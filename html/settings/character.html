@@ -7,6 +7,7 @@
         <a href="#" class="st-chatu8-sub-nav-link" data-sub-tab="ch-sub-tab-outfit-enable">启用通用服装列表</a>
         <a href="#" class="st-chatu8-sub-nav-link" data-sub-tab="ch-sub-tab-character-common">启用通用角色列表</a>
         <a href="#" class="st-chatu8-sub-nav-link" data-sub-tab="ch-sub-tab-banana-character">Banana角色管理</a>
+        <a href="#" class="st-chatu8-sub-nav-link" data-sub-tab="ch-sub-tab-injection-templates">提示词注入模板</a>
     </div>
 
     <!-- 角色设定子页面 -->
@@ -634,6 +635,125 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 提示词注入模板管理子页面 -->
+    <div id="ch-sub-tab-injection-templates" class="st-chatu8-sub-tab-content" style="display: none;">
+        <!-- 1 (顶部 100% 全宽): 预设方案管理卡片 -->
+        <div class="st-chatu8-settings-section" style="margin-bottom: 15px;">
+            <h3><i class="fa-solid fa-folder-tree"></i> 提示词注入模板方案管理</h3>
+            <div class="st-chatu8-field">
+                <label for="injection_template_preset_id">当前方案</label>
+                <div class="st-chatu8-profile-controls">
+                    <select id="injection_template_preset_id" class="st-chatu8-select"></select>
+                    <button class="st-chatu8-icon-btn" id="injection_template_new" title="新建方案"><i class="fa-solid fa-plus"></i></button>
+                    <button class="st-chatu8-icon-btn" id="injection_template_update" title="保存方案"><i class="fa-solid fa-save"></i></button>
+                    <button class="st-chatu8-icon-btn" id="injection_template_save_as" title="另存为"><i class="fa-solid fa-file-export"></i></button>
+                    <button class="st-chatu8-icon-btn" id="injection_template_rename" title="重命名方案"><i class="fa-solid fa-pen"></i></button>
+                    <button class="st-chatu8-icon-btn" id="injection_template_reset" title="恢复系统默认方案"><i class="fa-solid fa-rotate-left"></i></button>
+                    <button class="st-chatu8-icon-btn danger" id="injection_template_delete" title="删除方案"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2 (中部): 平级双栏 (左侧 4 大 Textarea 配置区，右侧等高按钮式变量工具栏) -->
+        <div style="display: flex; gap: 16px; align-items: stretch; margin-bottom: 15px; flex-wrap: wrap;">
+            
+            <!-- 左侧：模板格式配置区 (flex: 1) -->
+            <div class="st-chatu8-settings-section" style="flex: 1; min-width: 320px; margin-bottom: 0;">
+                <h3><i class="fa-solid fa-sliders"></i> 模板格式配置</h3>
+
+                <!-- 1. 角色启用列表项模板 -->
+                <div class="st-chatu8-field-col">
+                    <label for="tpl_characterListTemplate">
+                        角色启用列表项模板 <span style="font-weight: normal; font-size: 0.85em; opacity: 0.8;">(characterListTemplate)</span>
+                    </label>
+                    <textarea id="tpl_characterListTemplate" class="st-chatu8-textarea" rows="4" style="font-size: 0.9em;" placeholder="设置角色列表中每个角色的展开格式..."></textarea>
+                </div>
+
+                <!-- 2. 角色专属服装模板 -->
+                <div class="st-chatu8-field-col" style="margin-top: 15px;">
+                    <label for="tpl_innerOutfitTemplate">
+                        角色专属服装模板 <span style="font-weight: normal; font-size: 0.85em; opacity: 0.8;">(innerOutfitTemplate)</span>
+                    </label>
+                    <textarea id="tpl_innerOutfitTemplate" class="st-chatu8-textarea" rows="4" style="font-size: 0.9em;" placeholder="设置角色专属服装的展开格式..."></textarea>
+                </div>
+
+                <!-- 3. 通用角色展开模板 -->
+                <div class="st-chatu8-field-col" style="margin-top: 15px;">
+                    <label for="tpl_commonCharacterListTemplate">
+                        通用角色展开模板 <span style="font-weight: normal; font-size: 0.85em; opacity: 0.8;">(commonCharacterListTemplate)</span>
+                    </label>
+                    <textarea id="tpl_commonCharacterListTemplate" class="st-chatu8-textarea" rows="4" style="font-size: 0.9em;" placeholder="设置通用角色列表中角色的展开格式..."></textarea>
+                </div>
+
+                <!-- 4. 通用服装展开模板 -->
+                <div class="st-chatu8-field-col" style="margin-top: 15px;">
+                    <label for="tpl_enableOutfitListTemplate">
+                        通用服装展开模板 <span style="font-weight: normal; font-size: 0.85em; opacity: 0.8;">(enableOutfitListTemplate)</span>
+                    </label>
+                    <textarea id="tpl_enableOutfitListTemplate" class="st-chatu8-textarea" rows="4" style="font-size: 0.9em;" placeholder="设置通用服装列表中服装的展开格式..."></textarea>
+                </div>
+            </div>
+
+            <!-- 右侧：快捷变量工具栏 (320px, 与左栏等高 flex: stretch) -->
+            <div class="st-chatu8-settings-section" style="width: 320px; min-width: 280px; margin-bottom: 0; display: flex; flex-direction: column;">
+                <h3><i class="fa-solid fa-code"></i> 快捷变量工具栏</h3>
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <button type="button" class="st-chatu8-btn primary var-tab-btn active" data-tab="character" style="flex: 1; font-size: 0.85em; padding: 6px 8px;">
+                        <i class="fa-solid fa-user"></i> 角色变量
+                    </button>
+                    <button type="button" class="st-chatu8-btn var-tab-btn" data-tab="outfit" style="flex: 1; font-size: 0.85em; padding: 6px 8px;">
+                        <i class="fa-solid fa-shirt"></i> 服装变量
+                    </button>
+                </div>
+
+                <!-- 角色变量按钮面板 -->
+                <div id="var-panel-character" class="var-panel" style="display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 520px; padding-right: 4px;">
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{nameCN}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{nameCN}</span> <span style="opacity: 0.7; margin-left: auto;">角色中文名称</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{nameEN}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{nameEN}</span> <span style="opacity: 0.7; margin-left: auto;">角色英文标识</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{traits}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{traits}</span> <span style="opacity: 0.7; margin-left: auto;">角色特征/来源</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{facial}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{facial}</span> <span style="opacity: 0.7; margin-left: auto;">五官外貌(正面)</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{facialBack}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{facialBack}</span> <span style="opacity: 0.7; margin-left: auto;">五官外貌(背面)</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{upperSFW}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{upperSFW}</span> <span style="opacity: 0.7; margin-left: auto;">上半身 SFW</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{upperSFWBack}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{upperSFWBack}</span> <span style="opacity: 0.7; margin-left: auto;">上半身 SFW 背面</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{lowerSFW}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{lowerSFW}</span> <span style="opacity: 0.7; margin-left: auto;">下半身 SFW</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{lowerSFWBack}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{lowerSFWBack}</span> <span style="opacity: 0.7; margin-left: auto;">下半身 SFW 背面</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{upperNSFW}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{upperNSFW}</span> <span style="opacity: 0.7; margin-left: auto;">上半身 NSFW</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{upperNSFWBack}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{upperNSFWBack}</span> <span style="opacity: 0.7; margin-left: auto;">上半身 NSFW 背面</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{lowerNSFW}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{lowerNSFW}</span> <span style="opacity: 0.7; margin-left: auto;">下半身 NSFW</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{lowerNSFWBack}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{lowerNSFWBack}</span> <span style="opacity: 0.7; margin-left: auto;">下半身 NSFW 背面</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{negative}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{negative}</span> <span style="opacity: 0.7; margin-left: auto;">角色负面提示词</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{outfits}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{outfits}</span> <span style="opacity: 0.7; margin-left: auto;">专属服装展开点</span></button>
+                </div>
+
+                <!-- 服装变量按钮面板 -->
+                <div id="var-panel-outfit" class="var-panel" style="display: none; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 520px; padding-right: 4px;">
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{nameCN}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{nameCN}</span> <span style="opacity: 0.7; margin-left: auto;">服装中文名称</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{nameEN}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{nameEN}</span> <span style="opacity: 0.7; margin-left: auto;">服装英文标识</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{upperBody}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{upperBody}</span> <span style="opacity: 0.7; margin-left: auto;">上半身服装款式</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{upperBodyBack}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{upperBodyBack}</span> <span style="opacity: 0.7; margin-left: auto;">上半身服装背面</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{fullBody}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{fullBody}</span> <span style="opacity: 0.7; margin-left: auto;">下半身服装/裙裤</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{fullBodyBack}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{fullBodyBack}</span> <span style="opacity: 0.7; margin-left: auto;">下半身服装背面</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{lowerBody}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{lowerBody}</span> <span style="opacity: 0.7; margin-left: auto;">下半身服装 (别名)</span></button>
+                    <button type="button" class="st-chatu8-btn st-chatu8-var-btn" data-var="{lowerBodyBack}" style="text-align: left; justify-content: flex-start; font-size: 0.85em;"><span style="font-weight: bold; font-family: monospace;">{lowerBodyBack}</span> <span style="opacity: 0.7; margin-left: auto;">下半身背面 (别名)</span></button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 3 (底部 100% 全宽): 实时全量预览卡片 -->
+        <div class="st-chatu8-settings-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0;"><i class="fa-solid fa-eye"></i> 全量场景提示词合成预览 (All-in-One Live Preview)</h3>
+                <button id="injection_template_refresh_preview" class="st-chatu8-btn primary" style="font-size: 0.85em; padding: 4px 10px;">
+                    <i class="fa-solid fa-rotate"></i> 刷新预览
+                </button>
+            </div>
+            <div class="st-chatu8-field-col">
+                <textarea id="tpl_live_preview" class="st-chatu8-textarea" rows="12" readonly style="font-size: 0.9em;" placeholder="在此预览当前模板在包含2角色(各2服装)+2通用角色+2通用服装的模拟场景下合成出的最终提示词全貌..."></textarea>
             </div>
         </div>
     </div>
