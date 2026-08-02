@@ -28686,7 +28686,7 @@ var init_newline_fix = __esm({
 
 function showUserDemandPopup() {
   return new Promise((resolve) => {
-    const isMobile3 = isMobileDevice();
+    const isMobile3 = isMobileDeviceDialog();
     const uploadedImages = [];
     let topBound = 10;
     let bottomBound = window.innerHeight - 10;
@@ -28712,6 +28712,23 @@ function showUserDemandPopup() {
       bubble.classList.add("mobile");
       bubble.style.top = `${topBound}px`;
       bubble.style.maxHeight = `${availableHeight}px`;
+    } else {
+      bubble.style.maxHeight = Math.max(200, Math.floor(window.innerHeight * 0.85)) + "px";
+      requestAnimationFrame(() => {
+        try {
+          const vv = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+          const r = bubble.getBoundingClientRect();
+          if (r.top < 8 || r.bottom > vv + 8) {
+            bubble.style.position = "fixed";
+            bubble.style.top = "8px";
+            bubble.style.left = "50%";
+            bubble.style.transform = "translateX(-50%)";
+            bubble.style.margin = "0";
+            bubble.style.maxHeight = Math.max(200, vv - 24) + "px";
+            bubble.style.overflowY = "auto";
+          }
+        } catch (e) {}
+      });
     }
     const title = document.createElement("div");
     title.textContent = "\u{1F3A8} \u8F93\u5165\u751F\u6210\u9700\u6C42";
@@ -29716,7 +29733,7 @@ function buildImageParseFailureToastInfo(text) {
 }
 function showUserDemandPopup2() {
   return new Promise((resolve) => {
-    const isMobile3 = isMobileDevice();
+    const isMobile3 = isMobileDeviceDialog();
     const uploadedImages = [];
     let topOffset = 10;
     let maxHeight = "none";
@@ -29738,6 +29755,23 @@ function showUserDemandPopup2() {
       bubble.classList.add("mobile");
       bubble.style.top = `${topOffset}px`;
       bubble.style.maxHeight = maxHeight;
+    } else {
+      bubble.style.maxHeight = Math.max(200, Math.floor(window.innerHeight * 0.85)) + "px";
+      requestAnimationFrame(() => {
+        try {
+          const vv = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+          const r = bubble.getBoundingClientRect();
+          if (r.top < 8 || r.bottom > vv + 8) {
+            bubble.style.position = "fixed";
+            bubble.style.top = "8px";
+            bubble.style.left = "50%";
+            bubble.style.transform = "translateX(-50%)";
+            bubble.style.margin = "0";
+            bubble.style.maxHeight = Math.max(200, vv - 24) + "px";
+            bubble.style.overflowY = "auto";
+          }
+        } catch (e) {}
+      });
     }
     const title = document.createElement("div");
     title.textContent = "\u{1F5BC}\uFE0F \u8F93\u5165\u751F\u56FE\u9700\u6C42";
@@ -30259,7 +30293,7 @@ function readFileAsBase643(file) {
 }
 function showTagModifyDemandPopup() {
   return new Promise((resolve) => {
-    const isMobile3 = isMobileDevice();
+    const isMobile3 = isMobileDeviceDialog();
     const uploadedImages = [];
     let topBound = 10;
     let bottomBound = window.innerHeight - 10;
@@ -30267,15 +30301,15 @@ function showTagModifyDemandPopup() {
       const topSettingsHolder = document.querySelector("#top-settings-holder");
       if (topSettingsHolder) {
         const rect = topSettingsHolder.getBoundingClientRect();
-        topBound = rect.bottom + 10;
+        topBound = Math.max(10, Math.min(rect.bottom + 10, window.innerHeight * 0.5));
       }
       const sendForm = document.querySelector("#send_form");
       if (sendForm) {
         const rect = sendForm.getBoundingClientRect();
-        bottomBound = rect.top - 10;
+        bottomBound = Math.max(topBound + 200, Math.min(rect.top - 10, window.innerHeight - 10));
       }
     }
-    const availableHeight = bottomBound - topBound;
+    const availableHeight = Math.max(200, bottomBound - topBound);
     const overlay2 = document.createElement("div");
     overlay2.id = "tag-modify-overlay";
     overlay2.className = "st-chatu8-popup-overlay";
@@ -30285,6 +30319,23 @@ function showTagModifyDemandPopup() {
       bubble.classList.add("mobile");
       bubble.style.top = `${topBound}px`;
       bubble.style.maxHeight = `${availableHeight}px`;
+    } else {
+      bubble.style.maxHeight = Math.max(200, Math.floor(window.innerHeight * 0.85)) + "px";
+      requestAnimationFrame(() => {
+        try {
+          const vv = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+          const r = bubble.getBoundingClientRect();
+          if (r.top < 8 || r.bottom > vv + 8) {
+            bubble.style.position = "fixed";
+            bubble.style.top = "8px";
+            bubble.style.left = "50%";
+            bubble.style.transform = "translateX(-50%)";
+            bubble.style.margin = "0";
+            bubble.style.maxHeight = Math.max(200, vv - 24) + "px";
+            bubble.style.overflowY = "auto";
+          }
+        } catch (e) {}
+      });
     }
     const title = document.createElement("div");
     title.textContent = "\u{1F3F7}\uFE0F \u4FEE\u6539 Tag";
@@ -32299,7 +32350,7 @@ function getImageSizeConfigKeys(mode) {
 function showImageSizePopup(button, inputEl, onConfirm) {
   return new Promise((resolve) => {
     const doc = window.top.document;
-    const isMobile3 = isMobileDevice();
+    const isMobile3 = isMobileDeviceDialog();
     const settings3 = extension_settings38[extensionName];
     const mode = settings3.mode || "comfyui";
     const { widthKey, heightKey, modeName } = getImageSizeConfigKeys(mode);
@@ -32360,6 +32411,23 @@ function showImageSizePopup(button, inputEl, onConfirm) {
       bubble.classList.add("mobile");
       bubble.style.top = `${topBound}px`;
       bubble.style.maxHeight = `${availableHeight}px`;
+    } else {
+      bubble.style.maxHeight = Math.max(200, Math.floor(window.top.innerHeight * 0.85)) + "px";
+      requestAnimationFrame(() => {
+        try {
+          const vv = (window.top.visualViewport && window.top.visualViewport.height) || window.top.innerHeight;
+          const r = bubble.getBoundingClientRect();
+          if (r.top < 8 || r.bottom > vv + 8) {
+            bubble.style.position = "fixed";
+            bubble.style.top = "8px";
+            bubble.style.left = "50%";
+            bubble.style.transform = "translateX(-50%)";
+            bubble.style.margin = "0";
+            bubble.style.maxHeight = Math.max(200, vv - 24) + "px";
+            bubble.style.overflowY = "auto";
+          }
+        } catch (e) {}
+      });
     }
     const title = doc.createElement("div");
     title.textContent = `\u{1F4D0} \u56FE\u7247\u5927\u5C0F\u8BBE\u7F6E (${modeName})`;
@@ -39449,7 +39517,7 @@ function updateManagementImagePreview(container) {
 }
 function showTypeSelectionPopup() {
   return new Promise((resolve) => {
-    const isMobile3 = isMobileDevice();
+    const isMobile3 = isMobileDeviceDialog();
     let topOffset = 10;
     let maxHeight = "none";
     if (isMobile3) {
@@ -39470,6 +39538,23 @@ function showTypeSelectionPopup() {
       bubble.classList.add("mobile");
       bubble.style.top = `${topOffset}px`;
       bubble.style.maxHeight = maxHeight;
+    } else {
+      bubble.style.maxHeight = Math.max(200, Math.floor(window.innerHeight * 0.85)) + "px";
+      requestAnimationFrame(() => {
+        try {
+          const vv = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+          const r = bubble.getBoundingClientRect();
+          if (r.top < 8 || r.bottom > vv + 8) {
+            bubble.style.position = "fixed";
+            bubble.style.top = "8px";
+            bubble.style.left = "50%";
+            bubble.style.transform = "translateX(-50%)";
+            bubble.style.margin = "0";
+            bubble.style.maxHeight = Math.max(200, vv - 24) + "px";
+            bubble.style.overflowY = "auto";
+          }
+        } catch (e) {}
+      });
     }
     const title = document.createElement("div");
     title.className = "st-chatu8-popup-title";
@@ -39515,7 +39600,7 @@ function showTypeSelectionPopup() {
 function showPersonaGenDemandPopup(messagePreview, generationType = "character") {
   return new Promise((resolve) => {
     const uploadedImages = [];
-    const isMobile3 = isMobileDevice();
+    const isMobile3 = isMobileDeviceDialog();
     let topOffset = 10;
     let maxHeight = "none";
     if (isMobile3) {
@@ -39535,6 +39620,23 @@ function showPersonaGenDemandPopup(messagePreview, generationType = "character")
       bubble.classList.add("mobile");
       bubble.style.top = `${topOffset}px`;
       bubble.style.maxHeight = maxHeight;
+    } else {
+      bubble.style.maxHeight = Math.max(200, Math.floor(window.innerHeight * 0.85)) + "px";
+      requestAnimationFrame(() => {
+        try {
+          const vv = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+          const r = bubble.getBoundingClientRect();
+          if (r.top < 8 || r.bottom > vv + 8) {
+            bubble.style.position = "fixed";
+            bubble.style.top = "8px";
+            bubble.style.left = "50%";
+            bubble.style.transform = "translateX(-50%)";
+            bubble.style.margin = "0";
+            bubble.style.maxHeight = Math.max(200, vv - 24) + "px";
+            bubble.style.overflowY = "auto";
+          }
+        } catch (e) {}
+      });
     }
     const title = document.createElement("div");
     title.className = "st-chatu8-popup-title";
