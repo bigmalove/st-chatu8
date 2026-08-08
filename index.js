@@ -2404,6 +2404,22 @@ function blobToBase64(blob) {
     reader.readAsDataURL(blob);
   });
 }
+function detectBase64Mime(base64Data) {
+  try {
+    const binary = window.atob(base64Data.substring(0, 16));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    if (bytes.length >= 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+      return "video/mp4";
+    }
+    if (bytes.length >= 4 && bytes[0] === 0x1A && bytes[1] === 0x45 && bytes[2] === 0xDF && bytes[3] === 0xA3) {
+      return "video/webm";
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 function generateUUID() {
   if (crypto && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -63040,9 +63056,14 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
       const result = await readOpenAIResponse(response);
       const content = result.choices?.[0]?.message?.content;
       if (typeof content === "string") {
-        const videoSrcMatch = content.match(/src="([^"]+\.mp4[^"]*)"/);
-        if (videoSrcMatch && videoSrcMatch[1]) {
-          const videoUrl = videoSrcMatch[1];
+        const videoSrcRegex = /src="([^"]+\.(?:mp4|webm|mov|avi)[^"]*)"/i;
+        const markdownVideoRegex = /!\[.*?\]\(((?:https?:\/\/)[^\s\)]+\.(?:mp4|webm|mov|avi)(?:\?[^\s\)]*)?)\)/i;
+        const plainVideoUrlRegex = /((?:https?:\/\/)[^\s"'<>]+\.(?:mp4|webm|mov|avi)(?:\?[^\s]*)?)/i;
+        const videoSrcMatch = content.match(videoSrcRegex);
+        const markdownVideoMatch = content.match(markdownVideoRegex);
+        const plainVideoMatch = content.match(plainVideoUrlRegex);
+        const videoUrl = videoSrcMatch?.[1] || markdownVideoMatch?.[1] || plainVideoMatch?.[1];
+        if (videoUrl) {
           addLog(`[Banana] Video URL extracted: ${videoUrl}`);
           try {
             const videoResponse = await fetch(videoUrl, { headers: getDirectHeaders() });
@@ -63050,24 +63071,25 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
               throw new Error(`Failed to fetch video: ${videoResponse.status}`);
             }
             const videoBlob = await videoResponse.blob();
+            const detectedFormat = videoBlob.type && videoBlob.type.startsWith("video/") ? videoBlob.type : "video/mp4";
             const videoDataUrl = await new Promise((resolve, reject) => {
               const reader = new FileReader();
               reader.onloadend = () => resolve(reader.result);
               reader.onerror = reject;
               reader.readAsDataURL(videoBlob);
             });
-            addLog(`[Banana] Video downloaded (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB)`);
+            addLog(`[Banana] Video downloaded (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB, ${detectedFormat})`);
             taskQueue.completeTask(taskId, true);
             currentTaskId2 = null;
             const changeClean = change.replaceAll("{\u89C6\u9891}", "");
-            return { image: videoDataUrl, change: changeClean || prompt2, isVideo: true, format: "video/mp4", originalUrl: videoUrl, genParams: _videoGenParams };
+            return { image: videoDataUrl, change: changeClean || prompt2, isVideo: true, format: detectedFormat, originalUrl: videoUrl, genParams: _videoGenParams };
           } catch (fetchError) {
             addLog(`[Banana] Failed to download video: ${fetchError.message}`);
             throw new Error(`\u89C6\u9891\u4E0B\u8F7D\u5931\u8D25: ${fetchError.message}`);
           }
         }
       }
-      throw new Error("Video response did not contain a valid MP4 URL");
+      throw new Error("Video response did not contain a valid video URL");
     } catch (error) {
       addLog(`[Banana] \u89C6\u9891\u6A21\u5F0F\u9519\u8BEF: ${error.message}`);
       if (error.name === "AbortError" || error.message === "\u4EFB\u52A1\u5DF2\u53D6\u6D88") {
@@ -63202,33 +63224,56 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
         throw new Error(`Grok \u54CD\u5E94\u7F3A\u5C11 data[0]\uFF0C\u539F\u59CB\u54CD\u5E94: ${JSON.stringify(grokResult).slice(0, 500)}`);
       }
       let imageUrl = "";
+      let isVideoContent = false;
+      let videoFormat = "image";
+      let videoOriginalUrl = "";
       if (item.b64_json) {
-        imageUrl = `data:image/png;base64,${item.b64_json}`;
-        addLog("[Banana] Grok \u6A21\u5F0F\uFF1A\u4ECE b64_json \u63D0\u53D6\u5230\u56FE\u7247");
+        const detectedMime = detectBase64Mime(item.b64_json);
+        if (detectedMime && detectedMime.startsWith("video/")) {
+          imageUrl = `data:${detectedMime};base64,${item.b64_json}`;
+          isVideoContent = true;
+          videoFormat = detectedMime;
+          addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A\u4ECE b64_json \u68C0\u6D4B\u5230\u89C6\u9891 (${detectedMime})`);
+        } else {
+          imageUrl = `data:image/png;base64,${item.b64_json}`;
+          addLog("[Banana] Grok \u6A21\u5F0F\uFF1A\u4ECE b64_json \u63D0\u53D6\u5230\u56FE\u7247");
+        }
       } else if (item.url) {
-        addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A\u4E0B\u8F7D\u56FE\u7247 URL ${item.url}`);
+        videoOriginalUrl = item.url;
+        addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A\u4E0B\u8F7D\u5A92\u4F53 URL ${item.url}`);
         const imgResp = await fetch(item.url, { headers: getDirectHeaders() });
         if (!imgResp.ok) {
-          throw new Error(`\u4E0B\u8F7D\u56FE\u7247\u5931\u8D25: ${imgResp.status}`);
+          throw new Error(`\u4E0B\u8F7D\u5931\u8D25: ${imgResp.status}`);
         }
         const blob = await imgResp.blob();
+        if (blob.type && blob.type.startsWith("video/")) {
+          isVideoContent = true;
+          videoFormat = blob.type;
+          addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A\u68C0\u6D4B\u5230\u89C6\u9891 (${blob.type}, ${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
+        }
         imageUrl = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result);
           reader.onerror = reject;
           reader.readAsDataURL(blob);
         });
+        if (imageUrl.startsWith("data:video/")) {
+          isVideoContent = true;
+          const mimeMatch = imageUrl.match(/^data:(video\/[^;]+);/);
+          if (mimeMatch) videoFormat = mimeMatch[1];
+          addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A\u786E\u8BA4\u4E3A\u89C6\u9891 (${videoFormat})`);
+        }
       }
       if (!imageUrl) {
-        throw new Error("Grok \u54CD\u5E94\u672A\u5305\u542B\u56FE\u7247\uFF08b64_json/url \u5747\u4E3A\u7A7A\uFF09");
+        throw new Error("Grok \u54CD\u5E94\u672A\u5305\u542B\u5A92\u4F53\uFF08b64_json/url \u5747\u4E3A\u7A7A\uFF09");
       }
-      if (String(extension_settings47[extensionName].convertToJpegStorage) === "true") {
+      if (!isVideoContent && String(extension_settings47[extensionName].convertToJpegStorage) === "true") {
         imageUrl = await convertImageToJpeg(imageUrl);
       }
-      addLog("[Banana] Grok \u6A21\u5F0F\uFF1A\u56FE\u7247\u751F\u6210\u6210\u529F");
+      addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A${isVideoContent ? "\u89C6\u9891" : "\u56FE\u7247"}\u751F\u6210\u6210\u529F`);
       taskQueue.completeTask(taskId, true);
       currentTaskId2 = null;
-      return { image: imageUrl, change: change_ || "", genParams: _banana_gen_params };
+      return { image: imageUrl, change: change_ || "", isVideo: isVideoContent, format: videoFormat, originalUrl: videoOriginalUrl, genParams: _banana_gen_params };
     } catch (error) {
       addLog(`[Banana] Grok \u6A21\u5F0F\u9519\u8BEF: ${error.message}`);
       console.error("[Banana] Grok mode error:", error);
@@ -63443,35 +63488,44 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
     if (change && change.includes("{\u89C6\u9891}")) {
       const content = result.choices?.[0]?.message?.content;
       if (typeof content === "string") {
-        const videoSrcMatch = content.match(/src="([^"]+\.mp4[^"]*)"/);
-        if (videoSrcMatch && videoSrcMatch[1]) {
-          const videoUrl = videoSrcMatch[1];
-          addLog(`[Banana] Video URL extracted: ${videoUrl}`);
+        const videoSrcRegex2 = /src="([^"]+\.(?:mp4|webm|mov|avi)[^"]*)"/i;
+        const markdownVideoRegex2 = /!\[.*?\]\(((?:https?:\/\/)[^\s\)]+\.(?:mp4|webm|mov|avi)(?:\?[^\s\)]*)?)\)/i;
+        const plainVideoUrlRegex2 = /((?:https?:\/\/)[^\s"'<>]+\.(?:mp4|webm|mov|avi)(?:\?[^\s]*)?)/i;
+        const videoSrcMatch2 = content.match(videoSrcRegex2);
+        const markdownVideoMatch2 = content.match(markdownVideoRegex2);
+        const plainVideoMatch2 = content.match(plainVideoUrlRegex2);
+        const videoUrl2 = videoSrcMatch2?.[1] || markdownVideoMatch2?.[1] || plainVideoMatch2?.[1];
+        if (videoUrl2) {
+          addLog(`[Banana] Video URL extracted: ${videoUrl2}`);
           try {
-            const videoResponse = await fetch(videoUrl, { headers: getDirectHeaders() });
-            if (!videoResponse.ok) {
-              throw new Error(`Failed to fetch video: ${videoResponse.status}`);
+            const videoResponse2 = await fetch(videoUrl2, { headers: getDirectHeaders() });
+            if (!videoResponse2.ok) {
+              throw new Error(`Failed to fetch video: ${videoResponse2.status}`);
             }
-            const videoBlob = await videoResponse.blob();
-            const videoDataUrl = await new Promise((resolve, reject) => {
+            const videoBlob2 = await videoResponse2.blob();
+            const detectedFormat2 = videoBlob2.type && videoBlob2.type.startsWith("video/") ? videoBlob2.type : "video/mp4";
+            const videoDataUrl2 = await new Promise((resolve, reject) => {
               const reader = new FileReader();
               reader.onloadend = () => resolve(reader.result);
               reader.onerror = reject;
-              reader.readAsDataURL(videoBlob);
+              reader.readAsDataURL(videoBlob2);
             });
-            addLog(`[Banana] Video downloaded (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB)`);
+            addLog(`[Banana] Video downloaded (${(videoBlob2.size / 1024 / 1024).toFixed(2)} MB, ${detectedFormat2})`);
             taskQueue.completeTask(taskId, true);
             currentTaskId2 = null;
-            return { image: videoDataUrl, change: change_ || "", isVideo: true, format: "video/mp4", originalUrl: videoUrl, genParams: _banana_gen_params };
+            return { image: videoDataUrl2, change: change_ || "", isVideo: true, format: detectedFormat2, originalUrl: videoUrl2, genParams: _banana_gen_params };
           } catch (fetchError) {
             addLog(`[Banana] Failed to download video: ${fetchError.message}`);
             throw new Error(`\u89C6\u9891\u4E0B\u8F7D\u5931\u8D25: ${fetchError.message}`);
           }
         }
       }
-      throw new Error("Video response did not contain a valid MP4 URL");
+      throw new Error("Video response did not contain a valid video URL");
     }
     let imageUrl = "";
+    let isVideoContent = false;
+    let videoFormat = "image";
+    let videoOriginalUrl = "";
     const choices = result.choices;
     if (choices && choices.length > 0) {
       const content = choices[0].message?.content;
@@ -63481,6 +63535,13 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
         const firstImage = reasoningDetails.images[0];
         if (firstImage.type === "image_url" && firstImage.image_url) {
           imageUrl = typeof firstImage.image_url === "string" ? firstImage.image_url : firstImage.image_url.url;
+          const videoExtMatch2 = imageUrl && imageUrl.match(/\.(mp4|webm|mov|avi)(?:\?|$)/i);
+          if (videoExtMatch2) {
+            isVideoContent = true;
+            videoFormat = `video/${videoExtMatch2[1].toLowerCase()}`;
+            videoOriginalUrl = imageUrl.startsWith("data:") ? "" : imageUrl;
+            addLog(`[Banana] Detected video in reasoning_details (${videoFormat}).`);
+          }
           addLog("[Banana] Extracted image from reasoning_details.images array.");
         }
       }
@@ -63488,56 +63549,137 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
         for (const item of content) {
           if (item.type === "image_url" && item.image_url) {
             imageUrl = typeof item.image_url === "string" ? item.image_url : item.image_url.url;
+            const videoExtMatch = imageUrl && imageUrl.match(/\.(mp4|webm|mov|avi)(?:\?|$)/i);
+            if (videoExtMatch) {
+              isVideoContent = true;
+              videoFormat = `video/${videoExtMatch[1].toLowerCase()}`;
+              videoOriginalUrl = imageUrl.startsWith("data:") ? "" : imageUrl;
+              addLog(`[Banana] Detected video URL in image_url field (${videoFormat}).`);
+            }
             break;
           }
         }
       } else if (!imageUrl && typeof content === "string") {
-        const markdownImageRegex = /!\[.*?\]\(((?:https?:\/\/|data:image\/[^;]+;base64,)[^\s\)]+)\)/;
-        const match = content.match(markdownImageRegex);
-        if (match && match[1]) {
-          const mdImageData = match[1];
-          if (mdImageData.startsWith("data:image/")) {
+        const markdownMediaRegex = /!\[.*?\]\(((?:https?:\/\/|data:[a-z]+\/[^;]+;base64,)[^\s\)]+)\)/;
+        const videoSrcRegex = /src="([^"]+\.(?:mp4|webm|mov|avi)[^"]*)"/i;
+        const plainVideoUrlRegex = /((?:https?:\/\/)[^\s"'<>]+\.(?:mp4|webm|mov|avi)(?:\?[^\s]*)?)/i;
+        const markdownMatch = content.match(markdownMediaRegex);
+        const videoSrcMatch = content.match(videoSrcRegex);
+        const plainVideoMatch = content.match(plainVideoUrlRegex);
+        if (markdownMatch && markdownMatch[1]) {
+          const mdData = markdownMatch[1];
+          if (mdData.startsWith("data:video/")) {
+            addLog("[Banana] Detected Markdown embedded base64 video.");
+            imageUrl = mdData;
+            isVideoContent = true;
+            const mimeMatch = mdData.match(/^data:(video\/[^;]+);/);
+            videoFormat = mimeMatch ? mimeMatch[1] : "video/mp4";
+            addLog(`[Banana] Extracted base64 video from Markdown (${videoFormat}).`);
+          } else if (mdData.startsWith("data:image/")) {
             addLog("[Banana] Detected Markdown embedded base64 image.");
-            imageUrl = mdImageData;
+            imageUrl = mdData;
             addLog("[Banana] Successfully extracted base64 image from Markdown.");
           } else {
-            addLog("[Banana] Detected Markdown image URL, extracting...");
-            addLog(`[Banana] Markdown image URL: ${mdImageData}`);
+            addLog("[Banana] Detected Markdown media URL, extracting...");
+            addLog(`[Banana] Markdown media URL: ${mdData}`);
+            videoOriginalUrl = mdData;
             try {
-              const imageResponse = await fetch(mdImageData, { headers: getDirectHeaders() });
-              if (!imageResponse.ok) {
-                throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+              const mediaResponse = await fetch(mdData, { headers: getDirectHeaders() });
+              if (!mediaResponse.ok) {
+                throw new Error(`Failed to fetch media: ${mediaResponse.status}`);
               }
-              const imageBlob = await imageResponse.blob();
+              const mediaBlob = await mediaResponse.blob();
+              if (mediaBlob.type && mediaBlob.type.startsWith("video/")) {
+                isVideoContent = true;
+                videoFormat = mediaBlob.type;
+                addLog(`[Banana] Detected video (${mediaBlob.type}, ${(mediaBlob.size / 1024 / 1024).toFixed(2)} MB)`);
+              }
               const base64Data = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onloadend = () => resolve(reader.result);
                 reader.onerror = reject;
-                reader.readAsDataURL(imageBlob);
+                reader.readAsDataURL(mediaBlob);
               });
               imageUrl = base64Data;
-              if (String(extension_settings47[extensionName].convertToJpegStorage) === "true") {
+              if (imageUrl.startsWith("data:video/")) {
+                isVideoContent = true;
+                const mimeMatch = imageUrl.match(/^data:(video\/[^;]+);/);
+                if (mimeMatch) videoFormat = mimeMatch[1];
+                addLog(`[Banana] Confirmed video from data URL (${videoFormat}).`);
+              } else if (!isVideoContent && String(extension_settings47[extensionName].convertToJpegStorage) === "true") {
                 imageUrl = await convertImageToJpeg(imageUrl);
               }
-              addLog("[Banana] Successfully converted Markdown image to base64.");
+              addLog(`[Banana] Successfully converted Markdown media to base64.`);
             } catch (fetchError) {
-              addLog(`[Banana] Failed to fetch Markdown image: ${fetchError.message}`);
-              imageUrl = mdImageData;
+              addLog(`[Banana] Failed to fetch Markdown media: ${fetchError.message}`);
+              imageUrl = mdData;
               addLog("[Banana] Using direct URL as fallback.");
             }
           }
+        } else if (videoSrcMatch && videoSrcMatch[1]) {
+          const vUrl = videoSrcMatch[1];
+          addLog(`[Banana] Detected video URL in src attribute: ${vUrl}`);
+          videoOriginalUrl = vUrl;
+          try {
+            const videoResponse = await fetch(vUrl, { headers: getDirectHeaders() });
+            if (!videoResponse.ok) {
+              throw new Error(`Failed to fetch video: ${videoResponse.status}`);
+            }
+            const videoBlob = await videoResponse.blob();
+            isVideoContent = true;
+            videoFormat = videoBlob.type && videoBlob.type.startsWith("video/") ? videoBlob.type : "video/mp4";
+            addLog(`[Banana] Video downloaded (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB, ${videoFormat})`);
+            imageUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result);
+              reader.onerror = reject;
+              reader.readAsDataURL(videoBlob);
+            });
+          } catch (fetchError) {
+            addLog(`[Banana] Failed to fetch video: ${fetchError.message}`);
+            imageUrl = vUrl;
+            isVideoContent = true;
+            videoFormat = "video/mp4";
+            addLog("[Banana] Using direct video URL as fallback.");
+          }
+        } else if (plainVideoMatch && plainVideoMatch[1]) {
+          const vUrl = plainVideoMatch[1];
+          addLog(`[Banana] Detected plain video URL: ${vUrl}`);
+          videoOriginalUrl = vUrl;
+          try {
+            const videoResponse = await fetch(vUrl, { headers: getDirectHeaders() });
+            if (!videoResponse.ok) {
+              throw new Error(`Failed to fetch video: ${videoResponse.status}`);
+            }
+            const videoBlob = await videoResponse.blob();
+            isVideoContent = true;
+            videoFormat = videoBlob.type && videoBlob.type.startsWith("video/") ? videoBlob.type : "video/mp4";
+            addLog(`[Banana] Video downloaded (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB, ${videoFormat})`);
+            imageUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result);
+              reader.onerror = reject;
+              reader.readAsDataURL(videoBlob);
+            });
+          } catch (fetchError) {
+            addLog(`[Banana] Failed to fetch video: ${fetchError.message}`);
+            imageUrl = vUrl;
+            isVideoContent = true;
+            videoFormat = "video/mp4";
+            addLog("[Banana] Using direct video URL as fallback.");
+          }
         } else {
-          addLog("[Banana] Response contains text only, no image.");
+          addLog("[Banana] Response contains text only, no image or video.");
         }
       }
     }
     if (!imageUrl) {
-      throw new Error("API response did not contain image in OpenAI format");
+      throw new Error("API response did not contain image or video in OpenAI format");
     }
-    addLog("[Banana] Image generated successfully.");
+    addLog(`[Banana] ${isVideoContent ? "Video" : "Image"} generated successfully.`);
     taskQueue.completeTask(taskId, true);
     currentTaskId2 = null;
-    return { image: imageUrl, change: change_ || "", genParams: _banana_gen_params };
+    return { image: imageUrl, change: change_ || "", isVideo: isVideoContent, format: videoFormat, originalUrl: videoOriginalUrl, genParams: _banana_gen_params };
   } catch (error) {
     addLog(`[Banana] Fetch error: ${error.message}`);
     console.error("[Banana] Fetch error:", error);
