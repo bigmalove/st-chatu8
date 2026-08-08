@@ -2966,7 +2966,22 @@ async function getItemImg(tag, index = null) {
       const response = await fetch(imageEntry.path);
       if (response.ok) {
         const blob = await response.blob();
-        const base64 = await blobToBase64(blob);
+        let base64 = await blobToBase64(blob);
+        if (isVideo) {
+          const storedFormat = imageEntry.format || "";
+          let correctedMimeType = "video/mp4";
+          if (storedFormat) {
+            if (storedFormat.includes("webm")) {
+              correctedMimeType = "video/webm";
+            } else if (storedFormat.includes("mp4") || storedFormat.includes("h264")) {
+              correctedMimeType = "video/mp4";
+            } else if (storedFormat.startsWith("video/")) {
+              correctedMimeType = storedFormat;
+            }
+          }
+          const base64Data = base64.split(",")[1] || base64;
+          base64 = `data:${correctedMimeType};base64,${base64Data}`;
+        }
         return [base64, change, finalIndex, isVideo, originalUrl];
       }
     } catch (error) {
@@ -2975,7 +2990,17 @@ async function getItemImg(tag, index = null) {
   } else if (imageEntry.source === "db" && imageEntry.uuid) {
     const imageData = await storeReadOnly(imageEntry.uuid);
     if (imageData && imageData.data) {
-      const mimeType = isVideo ? "video/mp4" : "image/png";
+      let mimeType = isVideo ? "video/mp4" : "image/png";
+      const storedFormat = imageEntry.format || "";
+      if (isVideo && storedFormat) {
+        if (storedFormat.includes("webm")) {
+          mimeType = "video/webm";
+        } else if (storedFormat.includes("mp4") || storedFormat.includes("h264")) {
+          mimeType = "video/mp4";
+        } else if (storedFormat.startsWith("video/")) {
+          mimeType = storedFormat;
+        }
+      }
       const mediaBase64 = `data:${mimeType};base64,` + arrayBufferToBase64(imageData.data);
       return [mediaBase64, change, finalIndex, isVideo, originalUrl];
     }
@@ -3073,6 +3098,7 @@ async function setItemImg(tag, imgBase64, options = { format: "png" }) {
         thumbnail_path: thumbnailPath,
         date: newDate,
         isVideo,
+        format: format || "",
         originalUrl: originalUrl || "",
         size: base64ByteLength(base64Data),
         thumbnail_size: thumbnailSize,
@@ -3135,6 +3161,7 @@ async function setItemImg(tag, imgBase64, options = { format: "png" }) {
       thumbnail_uuid: thumbnailUUID,
       date: newDate,
       isVideo,
+      format: format || "",
       originalUrl: originalUrl || "",
       size: imageBuffer.byteLength,
       thumbnail_size: thumbnailSize,
@@ -62520,8 +62547,9 @@ Scheduler: ${payload.scheduler}
         taskQueue.completeTask(taskId, false);
         throw new Error("Endpoint did not return image data.");
       }
-      const videoFormats = ["mp4", "webm", "gif", "avi", "mov"];
+      const videoFormats = ["mp4", "webm", "avi", "mov"];
       const isVideo = videoFormats.some((fmt) => format && format.toLowerCase().includes(fmt));
+      const isGif = format && format.toLowerCase().includes("gif");
       const mediaType = isVideo ? "\u89C6\u9891" : "\u56FE\u7247";
       addLog(`${mediaType} \u751F\u6210\u6210\u529F(jiuguan client)\u3002`);
       const mimePrefix = isVideo ? "video" : "image";
@@ -62531,9 +62559,9 @@ Scheduler: ${payload.scheduler}
           mimeType = "mp4";
         } else if (format.includes("webm")) {
           mimeType = "webm";
-        } else if (format.includes("gif")) {
-          mimeType = "gif";
         }
+      } else if (isGif) {
+        mimeType = "gif";
       }
       imageUrl = `data:${mimePrefix}/${mimeType};base64,${data}`;
       setTimeout(() => {
@@ -62550,6 +62578,8 @@ Scheduler: ${payload.scheduler}
       let finalFormat = format;
       if (isVideo) {
         finalFormat = `video/${mimeType}`;
+      } else if (isGif) {
+        finalFormat = "image/gif";
       }
       return { image: imageUrl, change: change_ || "", isVideo, format: finalFormat, genParams: _comfy_gen_params };
     } else {
@@ -62608,32 +62638,46 @@ Scheduler: ${payload.scheduler}
           }
           if (re.hasOwnProperty(id)) {
             let getImageInfoFromOutputs = function(outputs) {
+              const videoExtensions = [".mp4", ".webm", ".mov", ".avi", ".mkv", ".flv", ".wmv"];
+              let imageOnlyResult = null;
               for (const key in outputs) {
                 const value = outputs[key];
-                if (value.images && value.images.length > 0) {
+                if (value.gifs && value.gifs.length > 0) {
+                  const gif = value.gifs[0];
+                  const isVideoByFormat = gif.format && gif.format.startsWith("video/");
+                  const isVideoByExt = videoExtensions.some((ext) => gif.filename && gif.filename.toLowerCase().endsWith(ext));
+                  const isVideo2 = isVideoByFormat || isVideoByExt;
+                  return {
+                    filename: gif.filename,
+                    subfolder: gif.subfolder || "",
+                    isVideo: isVideo2,
+                    format: gif.format || (isVideo2 ? "video/mp4" : "image/gif")
+                  };
+                }
+                if (value.images && value.images.length > 0 && !imageOnlyResult) {
                   const outputImage = value.images.find((img) => img.type === "output");
                   if (outputImage) {
-                    return {
+                    const isVideoByExt = videoExtensions.some((ext) => outputImage.filename && outputImage.filename.toLowerCase().endsWith(ext));
+                    const isVideoByFormat = outputImage.format && outputImage.format.startsWith("video/");
+                    const isVideo = isVideoByExt || isVideoByFormat;
+                    if (isVideo) {
+                      return {
+                        filename: outputImage.filename,
+                        subfolder: outputImage.subfolder || "",
+                        isVideo: true,
+                        format: outputImage.format || "video/mp4"
+                      };
+                    }
+                    imageOnlyResult = {
                       filename: outputImage.filename,
                       subfolder: outputImage.subfolder || "",
                       isVideo: false,
                       format: "image"
                     };
                   }
-                  continue;
-                }
-                if (value.gifs && value.gifs.length > 0) {
-                  const gif = value.gifs[0];
-                  const isVideo2 = gif.format && gif.format.startsWith("video/");
-                  return {
-                    filename: gif.filename,
-                    subfolder: gif.subfolder || "",
-                    isVideo: isVideo2,
-                    format: gif.format || "image/gif"
-                  };
                 }
               }
-              return null;
+              return imageOnlyResult;
             };
             let imageInfo = getImageInfoFromOutputs(re[id]["outputs"]);
             if (!imageInfo) {
