@@ -35616,22 +35616,27 @@ var init_generation = __esm({
                         c.remove();
                       }
                     });
-                    const container = doc.createElement("div");
-                    container.className = "st-chatu8-image-container";
-                    container.dataset.requestId = requestId;
-                    if (insertMode === "streaming") {
-                      const mesText = mesBlock.querySelector(".mes_text");
-                      if (mesText) {
-                        if (mesText.nextSibling) {
-                          mesBlock.insertBefore(container, mesText.nextSibling);
+                    // 去重：同一 requestId 的响应可能被重复处理（流式重渲染按钮后自动点击会重复触发），
+                    // 楼层内已存在同 requestId 的容器时直接复用，避免重复追加导致图片/视频显示两遍。
+                    let container = mesBlock.querySelector(`.st-chatu8-image-container[data-request-id="${requestId}"]`);
+                    if (!container) {
+                      container = doc.createElement("div");
+                      container.className = "st-chatu8-image-container";
+                      container.dataset.requestId = requestId;
+                      if (insertMode === "streaming") {
+                        const mesText = mesBlock.querySelector(".mes_text");
+                        if (mesText) {
+                          if (mesText.nextSibling) {
+                            mesBlock.insertBefore(container, mesText.nextSibling);
+                          } else {
+                            mesBlock.appendChild(container);
+                          }
                         } else {
                           mesBlock.appendChild(container);
                         }
-                      } else {
+                      } else if (insertMode === "bottom") {
                         mesBlock.appendChild(container);
                       }
-                    } else if (insertMode === "bottom") {
-                      mesBlock.appendChild(container);
                     }
                     const associatedButton = buttons[0];
                     createAndShowImage(container, imageData, "Generated Image", associatedButton || null, change, isVideo, originalUrl || "");
@@ -35665,9 +35670,11 @@ var init_generation = __esm({
             });
           });
         };
-        eventSource18.on(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
-        addLog(`\u56FE\u50CF\u54CD\u5E94\u76D1\u542C\u5668\u5DF2\u521B\u5EFA (ID: ${requestId})`);
         if (!alreadyGenerating) {
+          // 只在真正发起新请求时注册响应监听器；请求进行中重复触发（如流式重渲染后的自动点击）
+          // 不再注册第二个监听器，避免同一响应被处理两次导致媒体重复插入。
+          eventSource18.on(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
+          addLog(`\u56FE\u50CF\u54CD\u5E94\u76D1\u542C\u5668\u5DF2\u521B\u5EFA (ID: ${requestId})`);
           button.setAttribute("data-loading", "true");
           button.textContent = "\u52A0\u8F7D\u4E2D...";
           startGenerating(link);
