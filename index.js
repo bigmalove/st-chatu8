@@ -35622,7 +35622,11 @@ var init_generation = __esm({
                     if (insertMode === "streaming") {
                       const mesText = mesBlock.querySelector(".mes_text");
                       if (mesText) {
-                        mesText.appendChild(container);
+                        if (mesText.nextSibling) {
+                          mesBlock.insertBefore(container, mesText.nextSibling);
+                        } else {
+                          mesBlock.appendChild(container);
+                        }
                       } else {
                         mesBlock.appendChild(container);
                       }
