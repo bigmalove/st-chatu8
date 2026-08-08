@@ -2122,6 +2122,7 @@ var init_config = __esm({
       jiuguanchucun: "false",
       vibeJiuguanchucun: "true",
       convertToJpegStorage: "false",
+      mediaInsertPosition: "default",
       jiuguanStorage: {},
       banana: {
         apiKey: "123456",
@@ -35588,19 +35589,66 @@ var init_generation = __esm({
             addLog(`\u56FE\u50CF\u751F\u6210\u5931\u8D25 (ID: ${requestId}): ${error}`);
             toastr.error(`\u751F\u6210\u5931\u8D25: ${error || "\u672A\u77E5\u9519\u8BEF"}`);
           }
+          const insertMode = extension_settings40[extensionName]?.mediaInsertPosition || "default";
           docs2.forEach((doc) => {
             const spans = doc.querySelectorAll(`span[data-request-id="${requestId}"]`);
             const buttons = doc.querySelectorAll(`button[data-request-id="${requestId}"]`);
-            if (success && spans.length > 0) {
-              addLog(`${isVideo ? "\u89C6\u9891" : "\u56FE\u50CF"}\u751F\u6210\u6210\u529F (ID: ${requestId}), targeting ${spans.length} element(s).`);
-              spans.forEach((span) => {
-                const associatedButton = span.previousElementSibling;
-                if (associatedButton && associatedButton.matches(`button[data-request-id="${requestId}"]`)) {
-                  createAndShowImage(span, imageData, "Generated Image", associatedButton, change, isVideo, originalUrl || "");
+            if (success && (spans.length > 0 || insertMode !== "default")) {
+              if (insertMode === "default") {
+                addLog(`${isVideo ? "\u89C6\u9891" : "\u56FE\u50CF"}\u751F\u6210\u6210\u529F (ID: ${requestId}), targeting ${spans.length} element(s).`);
+                spans.forEach((span) => {
+                  const associatedButton = span.previousElementSibling;
+                  if (associatedButton && associatedButton.matches(`button[data-request-id="${requestId}"]`)) {
+                    createAndShowImage(span, imageData, "Generated Image", associatedButton, change, isVideo, originalUrl || "");
+                  } else {
+                    createAndShowImage(span, imageData, "Generated Image", null, change, isVideo, originalUrl || "");
+                  }
+                });
+              } else {
+                const mediaType = isVideo ? "\u89C6\u9891" : "\u56FE\u50CF";
+                addLog(`${mediaType}\u751F\u6210\u6210\u529F (ID: ${requestId}), insertMode=${insertMode}`);
+                const targetEl = spans[0] || buttons[0];
+                if (targetEl) {
+                  const mesBlock = targetEl.closest(".mes");
+                  if (mesBlock) {
+                    mesBlock.querySelectorAll(`.st-chatu8-image-container[data-request-id]`).forEach((c) => {
+                      if (c.dataset.requestId !== requestId) {
+                        c.remove();
+                      }
+                    });
+                    const container = doc.createElement("div");
+                    container.className = "st-chatu8-image-container";
+                    container.dataset.requestId = requestId;
+                    if (insertMode === "streaming") {
+                      const mesText = mesBlock.querySelector(".mes_text");
+                      if (mesText) {
+                        mesText.appendChild(container);
+                      } else {
+                        mesBlock.appendChild(container);
+                      }
+                    } else if (insertMode === "bottom") {
+                      mesBlock.appendChild(container);
+                    }
+                    const associatedButton = buttons[0];
+                    createAndShowImage(container, imageData, "Generated Image", associatedButton || null, change, isVideo, originalUrl || "");
+                    spans.forEach((s) => {
+                      s.style.display = "none";
+                    });
+                  } else {
+                    addLog(`\u672A\u627E\u5230 .mes \u7236\u5143\u7D20\uFF0C\u56DE\u9000\u5230\u9ED8\u8BA4\u63D2\u5165\u6A21\u5F0F`);
+                    spans.forEach((span) => {
+                      const associatedButton = span.previousElementSibling;
+                      if (associatedButton && associatedButton.matches(`button[data-request-id="${requestId}"]`)) {
+                        createAndShowImage(span, imageData, "Generated Image", associatedButton, change, isVideo, originalUrl || "");
+                      } else {
+                        createAndShowImage(span, imageData, "Generated Image", null, change, isVideo, originalUrl || "");
+                      }
+                    });
+                  }
                 } else {
-                  createAndShowImage(span, imageData, "Generated Image", null, change, isVideo, originalUrl || "");
+                  addLog(`\u672A\u627E\u5230\u76EE\u6807\u5143\u7D20 (ID: ${requestId}), \u8DF3\u8FC7\u63D2\u5165`);
                 }
-              });
+              }
             }
             buttons.forEach((b) => {
               b.removeAttribute("data-loading");
@@ -70015,6 +70063,9 @@ async function handleExportLog() {
   settingsInfo += `- \u7F13\u5B58 Vibe \u5230\u9152\u9986: ${settings3.vibeJiuguanchucun ? "\u662F" : "\u5426"}
 `;
   settingsInfo += `- \u8F6CJPEG\u50A8\u5B58: ${settings3.convertToJpegStorage ? "\u662F" : "\u5426"}
+`;
+  const insertPositionLabels = { default: "\u9ED8\u8BA4\u6807\u7B7E\u4F4D\u7F6E", streaming: "\u751F\u6210\u540E\u7ACB\u523B\u63D2\u5165\u6700\u65B0\u6587\u5B57\u4F4D\u7F6E", bottom: "\u63D2\u5165\u697C\u5C42\u6700\u5E95\u90E8" };
+  settingsInfo += `- \u63D2\u5165\u4F4D\u7F6E: ${insertPositionLabels[settings3.mediaInsertPosition] || settings3.mediaInsertPosition || "\u9ED8\u8BA4"}
 
 `;
   settingsInfo += `3. \u4E3B\u8981\u5927\u6A21\u578B (LLM) \u8BBE\u7F6E
@@ -82958,6 +83009,20 @@ image### 1girl, solo, blue hair ###
 > \u{1F4A1} \u5982\u679C\u56FE\u7247\u5F88\u591A\u5BFC\u81F4\u7A7A\u95F4\u7D27\u5F20\uFF0C\u53EF\u4EE5\u5F00\u542F\u3002\u8FFD\u6C42\u753B\u8D28\u8BF7\u5173\u95ED\u3002`
   },
   helpTipsEnabled: "\u5F00\u542F\u540E\uFF0C\u8BBE\u7F6E\u9879\u65C1\u8FB9\u4F1A\u663E\u793A **?** \u5E2E\u52A9\u6C14\u6CE1\uFF08\u9ED8\u8BA4\u5F00\u542F\uFF09",
+  mediaInsertPosition: {
+    short: "\u63A7\u5236\u751F\u6210\u7684\u56FE\u7247/\u89C6\u9891\u63D2\u5165\u5230\u804A\u5929\u6D88\u606F\u4E2D\u7684\u4F4D\u7F6E",
+    long: `### \u751F\u6210\u5185\u5BB9\u63D2\u5165\u4F4D\u7F6E
+
+\u63A7\u5236\u751F\u6210\u7684\u56FE\u7247\u6216\u89C6\u9891\u63D2\u5165\u5230\u804A\u5929\u6D88\u606F\u4E2D\u7684\u4F4D\u7F6E\u3002
+
+| \u6A21\u5F0F | \u8BF4\u660E |
+|------|------|
+| \u9ED8\u8BA4\u6807\u7B7E\u4F4D\u7F6E | \u6309\u7167 AI \u751F\u6210\u7684 \`<image>\` \u6807\u7B7E\u4F4D\u7F6E\u63D2\u5165\uFF08\u539F\u59CB\u884C\u4E3A\uFF09 |
+| \u751F\u6210\u540E\u7ACB\u523B\u63D2\u5165\u6700\u65B0\u6587\u5B57\u4F4D\u7F6E | \u751F\u6210\u5B8C\u6210\u540E\u7ACB\u5373\u5728\u5F53\u524D\u6700\u65B0\u6587\u5B57\u540E\u8FFD\u52A0\uFF0C\u9002\u914D\u6D41\u5F0F\u751F\u6210\u573AI\u672C\u6587\u8FD8\u5728\u8F93\u51FA |
+| \u63D2\u5165\u697C\u5C42\u6700\u5E95\u90E8 | \u76F4\u63A5\u5728\u6D88\u606F\u6700\u5E95\u90E8\u8FFD\u52A0\u5A92\u4F53 |
+
+> \u{1F4A1} \u6D41\u5F0F\u6A21\u5F0F\u9002\u5408 AI \u8FB9\u5199\u8FB9\u751F\u56FE\u7684\u573A\u666F\uFF0C\u751F\u6210\u5B8C\u6210\u540E\u7ACB\u5373\u63D2\u5165\u5230\u5DF2\u6709\u6587\u5B57\u540E\u9762\uFF0C\u4E0D\u7B49\u5F85\u5168\u90E8\u6587\u5B57\u8F93\u51FA\u5B8C\u6210\u3002`
+  },
   randomYushe: "\u5F00\u542F\u540E\uFF0C\u6BCF\u6B21\u751F\u56FE\u65F6\u5C06\u4ECE\u6240\u6709\u63D0\u793A\u8BCD\u9884\u8BBE\u4E2D**\u968F\u673A\u9009\u62E9**\u4E00\u4E2A\u4F7F\u7528\uFF0C\u800C\u975E\u4F7F\u7528\u5F53\u524D\u56FA\u5B9A\u7684\u9884\u8BBE\u3002\u9002\u5408\u5E0C\u671B\u6BCF\u6B21\u751F\u56FE\u98CE\u683C\u591A\u53D8\u7684\u573A\u666F\u3002",
   // ===== Stable Diffusion 页（sd.html） =====
   yusheid: "\u63D0\u793A\u8BCD\u9884\u8BBE\u6863\u4F4D\uFF0C\u53EF\u4FDD\u5B58\u591A\u7EC4\u56FA\u5B9A\u6B63/\u8D1F\u9762\u8BCD\u7EC4\u5408\u5207\u6362\u4F7F\u7528",
@@ -83994,7 +84059,7 @@ async function initUI({ check_update: check_update2 }) {
       settings2.theme_id = "\u9ED8\u8BA4-\u767D\u5929";
     }
     applyTheme(settings2.themes[settings2.theme_id]);
-    const mainKeys = ["scriptEnabled", "helpTipsEnabled", "newlineFixEnabled", "mode", "client", "displayMode", "heavyFrontendMode", "insertOriginalText", "dbclike", "collapseImage", "zidongdianji", "zidongdianji2", "longPressToEdit", "clickToPreview", "startTag", "endTag", "cache", "sdUrl", "st_chatu8_sd_auth", "comfyuiUrl", "novelaiApi", "novelaisite", "novelaiOtherSite", "enableCloudQueue", "cloudQueueUrl", "cloudQueueGreeting", "showQueueGreeting", "novelaimode", "novelai_sampler", "Schedule", "nai3Scale", "cfg_rescale", "AI_use_coords", "sm", "dyn", "nai3Variety", "nai3Deceisp", "sd_cwidth", "sd_cheight", "sd_csteps", "sd_cseed", "sdCfgScale", "restoreFaces", "novelai_width", "novelai_height", "novelai_steps", "novelai_seed", "nai3VibeTransfer", "enableVibeGroupTransfer", "randomVibeGroup", "normalizeRefStrength", "InformationExtracted", "ReferenceStrength", "nai3CharRef", "nai3StylePerception", "comfyui_width", "comfyui_height", "comfyui_steps", "comfyui_seed", "cfg_comfyui", "worker", "ipa", "c_fenwei", "c_xijie", "c_quanzhong", "c_idquanzhong", "AQT_sd", "UCP_sd", "AQT_novelai", "UCP_novelai", "AQT_comfyui", "UCP_comfyui", "addFurryDataset", "sd_cupscale_factor", "sd_chires_fix", "sd_chires_steps", "sd_cdenoising_strength", "sd_cclip_skip", "sd_cadetailer", "worldBookEnabled", "ai_temperature", "ai_top_p", "ai_presence_penalty", "ai_frequency_penalty", "ai_stream", "ai_private", "ai_token", "vocabulary_search_startswith", "vocabulary_search_limit", "vocabulary_search_sort", "enablePregen", "autoLLMImageGen", "randomYushe", "aiAutonomousResolution", "imageAlignment", "imageSizeScale", "imageGenInterval", "translation_system_prompt", "ai_test_system", "ai_test_user", "ai_test_output", "jiuguanchucun", "vibeJiuguanchucun", "convertToJpegStorage", "weilin_lora_fix"];
+    const mainKeys = ["scriptEnabled", "helpTipsEnabled", "newlineFixEnabled", "mode", "client", "displayMode", "heavyFrontendMode", "insertOriginalText", "dbclike", "collapseImage", "zidongdianji", "zidongdianji2", "longPressToEdit", "clickToPreview", "startTag", "endTag", "cache", "sdUrl", "st_chatu8_sd_auth", "comfyuiUrl", "novelaiApi", "novelaisite", "novelaiOtherSite", "enableCloudQueue", "cloudQueueUrl", "cloudQueueGreeting", "showQueueGreeting", "novelaimode", "novelai_sampler", "Schedule", "nai3Scale", "cfg_rescale", "AI_use_coords", "sm", "dyn", "nai3Variety", "nai3Deceisp", "sd_cwidth", "sd_cheight", "sd_csteps", "sd_cseed", "sdCfgScale", "restoreFaces", "novelai_width", "novelai_height", "novelai_steps", "novelai_seed", "nai3VibeTransfer", "enableVibeGroupTransfer", "randomVibeGroup", "normalizeRefStrength", "InformationExtracted", "ReferenceStrength", "nai3CharRef", "nai3StylePerception", "comfyui_width", "comfyui_height", "comfyui_steps", "comfyui_seed", "cfg_comfyui", "worker", "ipa", "c_fenwei", "c_xijie", "c_quanzhong", "c_idquanzhong", "AQT_sd", "UCP_sd", "AQT_novelai", "UCP_novelai", "AQT_comfyui", "UCP_comfyui", "addFurryDataset", "sd_cupscale_factor", "sd_chires_fix", "sd_chires_steps", "sd_cdenoising_strength", "sd_cclip_skip", "sd_cadetailer", "worldBookEnabled", "ai_temperature", "ai_top_p", "ai_presence_penalty", "ai_frequency_penalty", "ai_stream", "ai_private", "ai_token", "vocabulary_search_startswith", "vocabulary_search_limit", "vocabulary_search_sort", "enablePregen", "autoLLMImageGen", "randomYushe", "aiAutonomousResolution", "imageAlignment", "imageSizeScale", "imageGenInterval", "translation_system_prompt", "ai_test_system", "ai_test_user", "ai_test_output", "jiuguanchucun", "vibeJiuguanchucun", "convertToJpegStorage", "mediaInsertPosition", "weilin_lora_fix"];
     mainKeys.forEach((key) => {
       const element = document.getElementById(key);
       if (element) {
