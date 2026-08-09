@@ -35589,7 +35589,11 @@ var init_generation = __esm({
             addLog(`\u56FE\u50CF\u751F\u6210\u5931\u8D25 (ID: ${requestId}): ${error}`);
             toastr.error(`\u751F\u6210\u5931\u8D25: ${error || "\u672A\u77E5\u9519\u8BEF"}`);
           }
-          const insertMode = extension_settings40[extensionName]?.mediaInsertPosition || "default";
+          // mediaInsertPosition 正常取值 default/streaming/bottom（字符串）。历史版本或手动改配置
+          // 可能写成布尔 true，此前 `|| "default"` 会原样透传，导致 `insertMode !== "default"` 为 true
+          // 却又匹配不到 streaming/bottom 分支，容器被创建在错误位置，表现为“设置失效、只显示在标签处”。
+          const rawInsertMode = extension_settings40[extensionName]?.mediaInsertPosition;
+          const insertMode = ["streaming", "bottom"].includes(rawInsertMode) ? rawInsertMode : "default";
           docs2.forEach((doc) => {
             const spans = doc.querySelectorAll(`span[data-request-id="${requestId}"]`);
             const buttons = doc.querySelectorAll(`button[data-request-id="${requestId}"]`);
@@ -35735,6 +35739,15 @@ var init_generation = __esm({
       if (imageExistsInDom) {
         startGenerationProcess();
       } else {
+        // 非默认插入位置（streaming/bottom）时不走缓存快路径：该路径只会把媒体插入到标签 span 处，
+        // 与设置的插入位置相矛盾；改为直接走正常生成事件流，由响应处理器按设置的位置插入。
+        // 命中缓存时后端几乎立即返回，体感与缓存快路径一致。
+        const insertModeForCache = extension_settings40[extensionName]?.mediaInsertPosition;
+        const useCustomInsertPosition = ["streaming", "bottom"].includes(insertModeForCache);
+        if (useCustomInsertPosition) {
+          startGenerationProcess();
+          return;
+        }
         getItemImg(link).then(([imageUrl, dbChange, , isVideo, dbOriginalUrl]) => {
           if (imageUrl) {
             addLog(`Image for "${link}" already exists in DB. Skipping generation.`);
