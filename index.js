@@ -13715,6 +13715,7 @@ function getCleanLogicalText(el) {
     ".image-tag-button",
     ".st-chatu8-image-span",
     ".st-chatu8-image-container",
+    ".st-chatu8-media-slot",
     ".st-chatu8-collapse-wrapper"
   ];
   for (const selector of selectorsToRemove) {
@@ -14326,6 +14327,22 @@ async function deleteImagesForElement(el) {
     } catch (e) {
       console.warn("[imageInserter] Error removing elements with selector:", selector, e);
     }
+  }
+  // 非默认插入位置时媒体槽位挂在 .mes 上、不在 searchRoot(.mes_text) 里，上面的循环扫不到。
+  // 这里单独清理：只删掉已经没有对应 span 的孤儿槽位，locked 的 span 保留则其槽位一并保留。
+  try {
+    const slotScope = mesText?.closest(".mes") || (searchRoot.closest?.(".mes") ?? null);
+    if (slotScope) {
+      slotScope.querySelectorAll(".st-chatu8-media-slot[data-request-id]").forEach((slot) => {
+        const rid = slot.dataset.requestId;
+        if (!slotScope.querySelector(`.st-chatu8-image-span[data-request-id="${rid}"]`)) {
+          slot.remove();
+          removedCount++;
+        }
+      });
+    }
+  } catch (e) {
+    console.warn("[imageInserter] Error removing media slots:", e);
   }
   console.log("[imageInserter] Removed", removedCount, "image-related DOM elements, skipped", lockedCount, "locked");
   if (mesText) {
@@ -35349,6 +35366,87 @@ async function _dataUrlToBlob(dataUrl) {
 function setShowImagePreview(fn) {
   _showImagePreview = fn;
 }
+function getInsertMode() {
+  // mediaInsertPosition 正常取值 default/streaming/bottom（字符串）。历史版本或手动改配置
+  // 可能写成布尔 true，此前 `|| "default"` 会原样透传，导致 `insertMode !== "default"` 为真
+  // 却又匹配不到 streaming/bottom 分支，容器被创建在错误位置，表现为「设置失效、只显示在标签处」。
+  const raw = extension_settings40[extensionName]?.mediaInsertPosition;
+  return ["streaming", "bottom"].includes(raw) ? raw : "default";
+}
+function requestPlaceholderReprocess() {
+  try {
+    if (typeof debouncedProcessVisible === "function") {
+      debouncedProcessVisible();
+    }
+  } catch (e) {
+    console.warn("[st-chatu8] 触发占位符重扫失败:", e);
+  }
+}
+function hasRenderedMedia(anchorSpan, requestId) {
+  if (!anchorSpan) return false;
+  const MEDIA_SELECTOR = "img, video, .st-chatu8-video-notice";
+  if (anchorSpan.querySelector?.(MEDIA_SELECTOR)) return true;
+  const slot = anchorSpan.closest?.(".mes")?.querySelector(`.st-chatu8-media-slot[data-request-id="${requestId}"]`);
+  return Boolean(slot?.querySelector(MEDIA_SELECTOR));
+}
+function isLoadingButtonStale(button) {
+  if (!button?.hasAttribute?.("data-loading")) return false;
+  const link = button.dataset.link;
+  if (link && isGenerating(link)) {
+    // 仍标记为生成中，但超过兜底阈值就认定请求已经丢失（页面切换、监听器丢失等），
+    // 否则按钮会一直转圈到用户刷新为止。阈值大于 runninghub-proxy 的同步超时（900s）。
+    const since = Number(button.dataset.loadingSince || 0);
+    return since > 0 && Date.now() - since > LOADING_STALE_TIMEOUT_MS;
+  }
+  return true;
+}
+function resetLoadingButton(button) {
+  button.removeAttribute("data-loading");
+  delete button.dataset.loadingSince;
+  button.disabled = false;
+  button.textContent = "生成图片";
+  const link = button.dataset.link;
+  if (!link) return;
+  stopGenerating(link);
+  const requestId = button.dataset.requestId;
+  const anchorSpan = button.nextElementSibling;
+  if (!anchorSpan?.classList?.contains("st-chatu8-image-span")) return;
+  if (hasRenderedMedia(anchorSpan, requestId)) return;
+  // 生成其实早已成功并写入数据库，只是 UI 那一步没跑完 —— 直接从数据库补渲染。
+  getItemImg(link).then(([imageUrl, change, , isVideo, originalUrl]) => {
+    if (!imageUrl || hasRenderedMedia(anchorSpan, requestId)) return;
+    const target = resolveMediaContainer(button.ownerDocument, anchorSpan, requestId, getInsertMode());
+    createAndShowImage(target, imageUrl, "Generated Image", button, change, isVideo, originalUrl || "");
+    if (extension_settings40[extensionName].dbclike === "true") {
+      button.style.setProperty("display", "none", "important");
+    }
+  }).catch((e) => {
+    console.warn("[st-chatu8] 陈旧按钮补渲染失败:", e);
+  });
+}
+function resolveMediaContainer(doc, anchorSpan, requestId, insertMode) {
+  if (!anchorSpan || !insertMode || insertMode === "default") return anchorSpan;
+  const mesBlock = anchorSpan.closest?.(".mes");
+  if (!mesBlock) return anchorSpan;
+  let container = mesBlock.querySelector(`.st-chatu8-media-slot[data-request-id="${requestId}"]`);
+  if (!container) {
+    container = doc.createElement("div");
+    container.className = "st-chatu8-media-slot";
+    container.dataset.requestId = requestId;
+    if (insertMode === "streaming") {
+      const mesText = mesBlock.querySelector(".mes_text");
+      if (mesText && mesText.nextSibling) {
+        mesBlock.insertBefore(container, mesText.nextSibling);
+      } else {
+        mesBlock.appendChild(container);
+      }
+    } else {
+      mesBlock.appendChild(container);
+    }
+  }
+  anchorSpan.style.display = "none";
+  return container;
+}
 function createAndShowImage(container, imageUrl, alt, button, change, isVideo = false, originalUrl = "") {
   const doc = container.ownerDocument;
   if (!doc) return;
@@ -35426,8 +35524,8 @@ function createAndShowImage(container, imageUrl, alt, button, change, isVideo = 
     media.src = imageUrl;
     media.alt = alt;
   }
-  if (change) {
-    button.dataset.change = change ? change : "";
+  if (change && button) {
+    button.dataset.change = change;
   }
   let clickTimer = null;
   let pressTimer = null;
@@ -35554,6 +35652,8 @@ function createAndShowImage(container, imageUrl, alt, button, change, isVideo = 
   }
 }
 var _showImagePreview, triggerGeneration;
+var pendingResponseHandlers = /* @__PURE__ */ new Map();
+var LOADING_STALE_TIMEOUT_MS = 20 * 60 * 1e3;
 var init_generation = __esm({
   "utils/iframe/generation.js"() {
     init_config();
@@ -35581,106 +35681,72 @@ var init_generation = __esm({
           if (responseData.id !== requestId) return;
           console.log("Image response:", responseData);
           eventSource18.removeListener(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
+          pendingResponseHandlers.delete(requestId);
           addLog(`\u56FE\u50CF\u54CD\u5E94\u76D1\u542C\u5668\u5DF2\u9500\u6BC1 (ID: ${requestId})`);
           const { success, imageData, error, prompt: prompt2, change, isVideo, originalUrl } = responseData;
-          if (prompt2) stopGenerating(prompt2);
+          // \u515C\u5E95\u7528 link\uFF1A\u53D6\u6D88/\u5F02\u5E38\u8DEF\u5F84\u53EF\u80FD\u56DE\u4F20\u7A7A prompt\uFF0C\u82E5\u4E0D\u6E05\u7406\u4F1A\u8BA9 currentlyGenerating \u6C38\u4E45\u6B8B\u7559\uFF0C
+          // \u4E4B\u540E\u540C\u4E00\u6807\u7B7E\u7684\u6309\u94AE\u5168\u90E8\u5224\u5B9A\u4E3A\u300C\u751F\u6210\u4E2D\u300D\uFF0C\u53EA\u8F6C\u5708\u4E0D\u53D1\u8BF7\u6C42\u3002
+          stopGenerating(prompt2 || link);
           const docs2 = [document, ...Array.from(document.querySelectorAll("iframe")).map((f) => f.contentDocument).filter(Boolean)];
           if (!success) {
             addLog(`\u56FE\u50CF\u751F\u6210\u5931\u8D25 (ID: ${requestId}): ${error}`);
             toastr.error(`\u751F\u6210\u5931\u8D25: ${error || "\u672A\u77E5\u9519\u8BEF"}`);
           }
-          // mediaInsertPosition 正常取值 default/streaming/bottom（字符串）。历史版本或手动改配置
-          // 可能写成布尔 true，此前 `|| "default"` 会原样透传，导致 `insertMode !== "default"` 为 true
-          // 却又匹配不到 streaming/bottom 分支，容器被创建在错误位置，表现为“设置失效、只显示在标签处”。
-          const rawInsertMode = extension_settings40[extensionName]?.mediaInsertPosition;
-          const insertMode = ["streaming", "bottom"].includes(rawInsertMode) ? rawInsertMode : "default";
+          const insertMode = getInsertMode();
+          let inserted = false;
           docs2.forEach((doc) => {
             const spans = doc.querySelectorAll(`span[data-request-id="${requestId}"]`);
             const buttons = doc.querySelectorAll(`button[data-request-id="${requestId}"]`);
-            if (success && (spans.length > 0 || insertMode !== "default")) {
-              if (insertMode === "default") {
-                addLog(`${isVideo ? "\u89C6\u9891" : "\u56FE\u50CF"}\u751F\u6210\u6210\u529F (ID: ${requestId}), targeting ${spans.length} element(s).`);
+            try {
+              if (success && spans.length > 0) {
+                addLog(`${isVideo ? "视频" : "图像"}生成成功 (ID: ${requestId}), insertMode=${insertMode}, targeting ${spans.length} element(s).`);
                 spans.forEach((span) => {
-                  const associatedButton = span.previousElementSibling;
-                  if (associatedButton && associatedButton.matches(`button[data-request-id="${requestId}"]`)) {
-                    createAndShowImage(span, imageData, "Generated Image", associatedButton, change, isVideo, originalUrl || "");
-                  } else {
-                    createAndShowImage(span, imageData, "Generated Image", null, change, isVideo, originalUrl || "");
-                  }
+                  const prevEl = span.previousElementSibling;
+                  const associatedButton = prevEl && prevEl.matches(`button[data-request-id="${requestId}"]`) ? prevEl : buttons[0] || null;
+                  const target = resolveMediaContainer(doc, span, requestId, insertMode);
+                  createAndShowImage(target, imageData, "Generated Image", associatedButton, change, isVideo, originalUrl || "");
                 });
-              } else {
-                const mediaType = isVideo ? "\u89C6\u9891" : "\u56FE\u50CF";
-                addLog(`${mediaType}\u751F\u6210\u6210\u529F (ID: ${requestId}), insertMode=${insertMode}`);
-                const targetEl = spans[0] || buttons[0];
-                if (targetEl) {
-                  const mesBlock = targetEl.closest(".mes");
-                  if (mesBlock) {
-                    mesBlock.querySelectorAll(`.st-chatu8-image-container[data-request-id]`).forEach((c) => {
-                      if (c.dataset.requestId !== requestId) {
-                        c.remove();
-                      }
-                    });
-                    // 去重：同一 requestId 的响应可能被重复处理（流式重渲染按钮后自动点击会重复触发），
-                    // 楼层内已存在同 requestId 的容器时直接复用，避免重复追加导致图片/视频显示两遍。
-                    let container = mesBlock.querySelector(`.st-chatu8-image-container[data-request-id="${requestId}"]`);
-                    if (!container) {
-                      container = doc.createElement("div");
-                      container.className = "st-chatu8-image-container";
-                      container.dataset.requestId = requestId;
-                      if (insertMode === "streaming") {
-                        const mesText = mesBlock.querySelector(".mes_text");
-                        if (mesText) {
-                          if (mesText.nextSibling) {
-                            mesBlock.insertBefore(container, mesText.nextSibling);
-                          } else {
-                            mesBlock.appendChild(container);
-                          }
-                        } else {
-                          mesBlock.appendChild(container);
-                        }
-                      } else if (insertMode === "bottom") {
-                        mesBlock.appendChild(container);
-                      }
-                    }
-                    const associatedButton = buttons[0];
-                    createAndShowImage(container, imageData, "Generated Image", associatedButton || null, change, isVideo, originalUrl || "");
-                    spans.forEach((s) => {
-                      s.style.display = "none";
-                    });
-                  } else {
-                    addLog(`\u672A\u627E\u5230 .mes \u7236\u5143\u7D20\uFF0C\u56DE\u9000\u5230\u9ED8\u8BA4\u63D2\u5165\u6A21\u5F0F`);
-                    spans.forEach((span) => {
-                      const associatedButton = span.previousElementSibling;
-                      if (associatedButton && associatedButton.matches(`button[data-request-id="${requestId}"]`)) {
-                        createAndShowImage(span, imageData, "Generated Image", associatedButton, change, isVideo, originalUrl || "");
-                      } else {
-                        createAndShowImage(span, imageData, "Generated Image", null, change, isVideo, originalUrl || "");
-                      }
-                    });
-                  }
+                inserted = true;
+              } else if (success) {
+                addLog(`未找到目标元素 (ID: ${requestId})，稍后由重扫从数据库补渲染`);
+              }
+            } catch (e) {
+              console.error("[st-chatu8] 插入生成结果失败:", e);
+              addLog(`插入生成结果失败 (ID: ${requestId}): ${e?.message || e}`);
+            } finally {
+              // 必须放在 finally：上面任何异常都不能留下永久转圈的按钮，
+              // 否则 findAndReplaceInElement 的 loading 早退会把整个楼层锁死，只能刷新页面才显示。
+              buttons.forEach((b) => {
+                b.removeAttribute("data-loading");
+                delete b.dataset.loadingSince;
+                if (success && extension_settings40[extensionName].dbclike == "true") {
+                  b.style.setProperty("display", "none", "important");
                 } else {
-                  addLog(`\u672A\u627E\u5230\u76EE\u6807\u5143\u7D20 (ID: ${requestId}), \u8DF3\u8FC7\u63D2\u5165`);
+                  b.disabled = false;
+                  b.textContent = "生成图片";
                 }
-              }
+              });
             }
-            buttons.forEach((b) => {
-              b.removeAttribute("data-loading");
-              if (success && extension_settings40[extensionName].dbclike == "true") {
-                b.style.setProperty("display", "none", "important");
-              } else {
-                b.disabled = false;
-                b.textContent = "\u751F\u6210\u56FE\u7247";
-              }
-            });
           });
+          if (success && !inserted) {
+            // 响应到达时 DOM 里还没有目标元素（流式重渲染中途），触发一次重扫从数据库补渲染。
+            requestPlaceholderReprocess();
+          }
         };
-        if (!alreadyGenerating) {
-          // 只在真正发起新请求时注册响应监听器；请求进行中重复触发（如流式重渲染后的自动点击）
-          // 不再注册第二个监听器，避免同一响应被处理两次导致媒体重复插入。
+        if (!pendingResponseHandlers.has(requestId)) {
+          // 按 requestId 去重注册：既保证「请求进行中被重建的按钮」也能收到响应（否则永久转圈），
+          // 又不会因流式重渲染反复触发而注册出多个监听器导致媒体重复插入。
+          pendingResponseHandlers.set(requestId, imageResponseHandler);
           eventSource18.on(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
-          addLog(`\u56FE\u50CF\u54CD\u5E94\u76D1\u542C\u5668\u5DF2\u521B\u5EFA (ID: ${requestId})`);
+          addLog(`图像响应监听器已创建 (ID: ${requestId})`);
+        }
+        if (alreadyGenerating && !button.dataset.loadingSince) {
+          button.dataset.loadingSince = String(Date.now());
+        }
+        if (!alreadyGenerating) {
           button.setAttribute("data-loading", "true");
-          button.textContent = "\u52A0\u8F7D\u4E2D...";
+          button.dataset.loadingSince = String(Date.now());
+          button.textContent = "加载中...";
           startGenerating(link);
           const buttonChange = button.dataset.change;
           let requestPrompt = link;
@@ -35730,7 +35796,9 @@ var init_generation = __esm({
       let imageExistsInDom = false;
       for (const doc of docs) {
         const span = doc.querySelector(`span[data-request-id="${requestId}"]`);
-        if (span && span.querySelector("img, video, .st-chatu8-video-fallback")) {
+        // 非默认插入位置时媒体在 .mes 层的槽位里而不在 span 内，用 hasRenderedMedia 统一判断，
+        // 否则重复点击会被误判成「DOM 里还没有媒体」而走缓存渲染，丢掉重新生成的语义。
+        if (span && (hasRenderedMedia(span, requestId) || span.querySelector(".st-chatu8-video-fallback"))) {
           console.log("Media already exists in DOM. Triggering regeneration.");
           imageExistsInDom = true;
           break;
@@ -35739,15 +35807,9 @@ var init_generation = __esm({
       if (imageExistsInDom) {
         startGenerationProcess();
       } else {
-        // 非默认插入位置（streaming/bottom）时不走缓存快路径：该路径只会把媒体插入到标签 span 处，
-        // 与设置的插入位置相矛盾；改为直接走正常生成事件流，由响应处理器按设置的位置插入。
-        // 命中缓存时后端几乎立即返回，体感与缓存快路径一致。
-        const insertModeForCache = extension_settings40[extensionName]?.mediaInsertPosition;
-        const useCustomInsertPosition = ["streaming", "bottom"].includes(insertModeForCache);
-        if (useCustomInsertPosition) {
-          startGenerationProcess();
-          return;
-        }
+        // 缓存快路径现在经 resolveMediaContainer 插入，已能遵守 mediaInsertPosition，
+        // 因此非默认插入位置时不再需要绕开它去重新生成 —— 那会让每次重渲染都重跑一次
+        // 后端生成（视频动辄数分钟且产生费用），代价远大于收益。
         getItemImg(link).then(([imageUrl, dbChange, , isVideo, dbOriginalUrl]) => {
           if (imageUrl) {
             addLog(`Image for "${link}" already exists in DB. Skipping generation.`);
@@ -35756,8 +35818,10 @@ var init_generation = __esm({
               for (const span of spans) {
                 const associatedButton = span.previousElementSibling;
                 if (associatedButton && associatedButton.matches(`button[data-request-id="${requestId}"]`)) {
-                  createAndShowImage(span, imageUrl, "Generated Image", associatedButton, dbChange, isVideo, dbOriginalUrl || "");
+                  const target = resolveMediaContainer(doc, span, requestId, getInsertMode());
+                  createAndShowImage(target, imageUrl, "Generated Image", associatedButton, dbChange, isVideo, dbOriginalUrl || "");
                   associatedButton.removeAttribute("data-loading");
+                  delete associatedButton.dataset.loadingSince;
                   if (extension_settings40[extensionName].dbclike === "true") {
                     associatedButton.style.setProperty("display", "none", "important");
                   } else {
@@ -35810,7 +35874,10 @@ function extractPureTag(tag, startTag, endTag) {
 async function getSavedImageMatches(logicalText, rootElement, logicalTextForMatchOverride, firstDivEndOffset = 0) {
   const result = [];
   try {
-    const existingImage = rootElement.querySelector(`.st-chatu8-image-container`);
+    // 非默认插入位置时媒体容器挂在 .mes 上（不在 .mes_text 内），必须扩到 .mes 范围才看得见，
+    // 否则守卫失效，会在标签处又补一份出来，表现为「插入位置设置无效」。
+    const guardScope = rootElement.closest?.(".mes") || rootElement;
+    const existingImage = guardScope.querySelector(`.st-chatu8-image-container, .st-chatu8-media-slot`);
     if (existingImage) {
       return result;
     }
@@ -36093,7 +36160,8 @@ async function createButtonAtPosition(insertPosition, tag, nodeInfos, doc, rootE
   }
   const [imageUrl, change, , isVideo, originalUrl] = await getItemImg(link);
   if (imageUrl) {
-    createAndShowImage(imgSpan, imageUrl, imageAlt, button, change, isVideo, originalUrl);
+    const target = resolveMediaContainer(doc, imgSpan, requestId, getInsertMode());
+    createAndShowImage(target, imageUrl, imageAlt, button, change, isVideo, originalUrl);
     if (settings3.dbclike === "true") {
       button.style.setProperty("display", "none", "important");
     }
@@ -36107,6 +36175,23 @@ async function createButtonAtPosition(insertPosition, tag, nodeInfos, doc, rootE
 }
 async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image") {
   if (!rootElement) {
+    return;
+  }
+  // 先扫一遍转圈按钮：只有「真的还在生成中」的才阻塞本轮处理。
+  // 陈旧的转圈按钮（对应任务早已结束或超时）会被就地复位并尝试从数据库补渲染媒体，
+  // 否则一个卡死的 spinner 会永久锁死这个楼层，用户只能靠刷新页面才能看到结果。
+  const loadingButtons = rootElement.querySelectorAll('button.image-tag-button[data-loading="true"]');
+  let hasActiveLoading = false;
+  for (const loadingButton of loadingButtons) {
+    if (isLoadingButtonStale(loadingButton)) {
+      console.log("[iframe] Clearing stale loading button:", loadingButton.dataset.link?.substring(0, 50));
+      resetLoadingButton(loadingButton);
+    } else {
+      hasActiveLoading = true;
+    }
+  }
+  if (hasActiveLoading) {
+    console.log("[iframe] Element has loading button, skipping processing");
     return;
   }
   if (rootElement.dataset && rootElement.dataset.chatu8Processed === "true") {
@@ -36126,11 +36211,6 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
         delete rootElement.dataset.chatu8ContentLength;
       }
     }
-  }
-  const loadingButton = rootElement.querySelector('button.image-tag-button[data-loading="true"]');
-  if (loadingButton) {
-    console.log("[iframe] Element has loading button, skipping processing");
-    return;
   }
   const settings3 = extension_settings41[extensionName];
   if (!settings3.startTag || !settings3.endTag) {
@@ -36360,7 +36440,8 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
     const promise = (async () => {
       const [imageUrl, change, , isVideo, originalUrl] = await getItemImg(link);
       if (imageUrl) {
-        createAndShowImage(imgSpan, imageUrl, imageAlt, button, change, isVideo, originalUrl);
+        const target = resolveMediaContainer(doc, imgSpan, requestId, getInsertMode());
+        createAndShowImage(target, imageUrl, imageAlt, button, change, isVideo, originalUrl);
         if (extension_settings41[extensionName].dbclike === "true") {
           button.style.setProperty("display", "none", "important");
         }
@@ -37602,7 +37683,9 @@ function shouldIgnoreIframeMutations(mutations) {
     if (changedNodes.length === 0) {
       return isPluginManagedNode(mutation.target);
     }
-    return changedNodes.every(isPluginManagedNode) && isPluginManagedNode(mutation.target);
+    // 只要变更的节点全都是插件自己插的，就可以忽略；不再要求 mutation.target 也受管 ——
+    // 非默认插入位置时媒体槽位是挂到 .mes 上的，target 永远不受管，会导致插件自己触发重扫。
+    return changedNodes.every(isPluginManagedNode);
   });
 }
 function cleanupDetachedIframeObservers() {
@@ -37760,7 +37843,7 @@ var init_iframe = __esm({
     window.zidongdianji = false;
     iframeObserverState = /* @__PURE__ */ new Map();
     mainDocumentObserver = null;
-    PLUGIN_MANAGED_SELECTOR = ".image-tag-button, .st-chatu8-image-button, .st-chatu8-image-span, .st-chatu8-image-container, .st-chatu8-collapse-wrapper";
+    PLUGIN_MANAGED_SELECTOR = ".image-tag-button, .st-chatu8-image-button, .st-chatu8-image-span, .st-chatu8-image-container, .st-chatu8-media-slot, .st-chatu8-collapse-wrapper";
     setTriggerGeneration(triggerGeneration);
     setGorkTriggerGeneration(triggerGeneration);
     setShowImagePreview(showImagePreview);
@@ -63300,15 +63383,20 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
       let videoFormat = "image";
       let videoOriginalUrl = "";
       if (item.b64_json) {
-        const detectedMime = detectBase64Mime(item.b64_json);
+        // 服务端（如 runninghub-proxy）会在 mime_type 里明确回传 video/mp4，优先采信；
+        // 只有缺失时才回落到魔术字节嗅探（它只认 ftyp/EBML，遇到 styp 或前置 free box 的 mp4 会误判成图片）。
+        const declaredMime = typeof item.mime_type === "string" ? item.mime_type : "";
+        const sniffedMime = detectBase64Mime(item.b64_json);
+        const detectedMime = declaredMime.startsWith("video/") ? declaredMime : sniffedMime || declaredMime;
         if (detectedMime && detectedMime.startsWith("video/")) {
           imageUrl = `data:${detectedMime};base64,${item.b64_json}`;
           isVideoContent = true;
           videoFormat = detectedMime;
           addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A\u4ECE b64_json \u68C0\u6D4B\u5230\u89C6\u9891 (${detectedMime})`);
         } else {
-          imageUrl = `data:image/png;base64,${item.b64_json}`;
-          addLog("[Banana] Grok \u6A21\u5F0F\uFF1A\u4ECE b64_json \u63D0\u53D6\u5230\u56FE\u7247");
+          const imageMime = detectedMime.startsWith("image/") ? detectedMime : "image/png";
+          imageUrl = `data:${imageMime};base64,${item.b64_json}`;
+          addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A\u4ECE b64_json \u63D0\u53D6\u5230\u56FE\u7247 (${imageMime})`);
         }
       } else if (item.url) {
         videoOriginalUrl = item.url;
@@ -63849,16 +63937,6 @@ async function bananaGenerate(requestData) {
       format: format || "image",
       originalUrl: originalUrl || ""
     });
-    eventSource24.emit("generate-image-response", {
-      id,
-      success: true,
-      imageData: imageUrl,
-      prompt: prompt2,
-      change: change_,
-      isVideo: isVideo || false,
-      format: format || "image",
-      originalUrl: originalUrl || ""
-    });
     addLog(`[Banana] Emitted success response for ID: ${id}`);
   } catch (error) {
     const errorMessage = `[Banana] Generation failed for ID ${id}: ${error.message}`;
@@ -63866,12 +63944,6 @@ async function bananaGenerate(requestData) {
     console.error(errorMessage);
     recordImageGeneration("banana", false);
     eventSource24.emit(EventType.GENERATE_IMAGE_RESPONSE, {
-      id,
-      success: false,
-      error: error.message,
-      prompt: prompt2
-    });
-    eventSource24.emit("generate-image-response", {
       id,
       success: false,
       error: error.message,
@@ -63887,12 +63959,6 @@ function handleCancelBananaTask(data) {
     addLog(`[Banana] \u53D6\u6D88\u5F53\u524D\u4EFB\u52A1\uFF0C\u53D1\u9001\u5931\u8D25\u54CD\u5E94 (ID: ${currentRequestId})`);
     recordImageGeneration("banana", false);
     eventSource24.emit(EventType.GENERATE_IMAGE_RESPONSE, {
-      id: currentRequestId,
-      success: false,
-      error: "\u4EFB\u52A1\u5DF2\u53D6\u6D88",
-      prompt: currentPrompt || ""
-    });
-    eventSource24.emit("generate-image-response", {
       id: currentRequestId,
       success: false,
       error: "\u4EFB\u52A1\u5DF2\u53D6\u6D88",
