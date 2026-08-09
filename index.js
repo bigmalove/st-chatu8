@@ -6992,6 +6992,49 @@ function extractIfCondition(rawValue) {
   const valuePart = head.substring(0, head.length - m[0].length).replace(/\s+$/, "");
   return { value: valuePart, condition };
 }
+// 「正则替换」/「正则替换分角色」模式的触发词整体当作正则处理：不按 | 拆分、不做转义。
+// 触发词可以写成裸正则（不能含 =），也可以写成 /pattern/flags 包裹形式，
+// 后者能安全表达含 = 的语法（先行断言 (?= / (?<= 等）。
+function parseRegexRuleTrigger(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("/")) return null;
+  for (let i = 1; i < trimmed.length; i++) {
+    if (trimmed[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (trimmed[i] !== "/") continue;
+    const rest = trimmed.substring(i + 1);
+    const m = rest.match(/^([gimsuy]*)=([\s\S]*)$/);
+    if (!m) return null;
+    return { pattern: trimmed.substring(1, i), flags: m[1], ruleContent: m[2] };
+  }
+  return null;
+}
+function compileTriggerRegex(pattern, flags, logPrefix = "") {
+  const finalFlags = flags && flags.includes("g") ? flags : `${flags || ""}g`;
+  try {
+    return new RegExp(pattern, finalFlags);
+  } catch (e) {
+    addLog(`${logPrefix}正则替换规则语法错误，已跳过: /${pattern}/${finalFlags} (${e.message})`);
+    return null;
+  }
+}
+function applyRegexReplaceRule({ pattern, flags, haystack, target, realValue, condition, conditionHaystack, logPrefix = "" }) {
+  const re = compileTriggerRegex(pattern, flags, logPrefix);
+  if (!re) return null;
+  re.lastIndex = 0;
+  if (!re.test(haystack)) return null;
+  const ifHaystack = typeof conditionHaystack === "string" && conditionHaystack.length > 0 ? conditionHaystack : haystack;
+  if (condition && !safeEvaluateIf(condition, ifHaystack, logPrefix)) {
+    addLog(`${logPrefix}@if 未通过，跳过正则规则: /${pattern}/ 条件="${condition}"`);
+    return null;
+  }
+  if (condition) addLog(`${logPrefix}@if 通过: /${pattern}/ 条件="${condition}"`);
+  re.lastIndex = 0;
+  addLog(`${logPrefix}Prompt 正则替换: /${pattern}/ -> "${realValue}"`);
+  return target.replace(re, realValue);
+}
 function evaluateCondition(expr, haystack) {
   const src = String(expr);
   const hay = String(haystack).toLowerCase();
@@ -7096,16 +7139,29 @@ ${rulesText}`);
   const rules = rulesText.split("\n");
   for (const line of rules) {
     if (line.trim() === "") continue;
-    const parts = line.split("=");
+    const literal = parseRegexRuleTrigger(line);
+    const parts = literal ? [literal.pattern, literal.ruleContent] : line.split("=");
     if (parts.length < 2) continue;
-    const trigger = parts[0].trim();
+    const trigger = literal ? literal.pattern : parts[0].trim();
     if (!trigger) continue;
-    const ruleContent = parts.slice(1).join("=");
+    const ruleContent = literal ? literal.ruleContent : parts.slice(1).join("=");
     if (!ruleContent.includes("|")) continue;
     const pipeIndex = ruleContent.indexOf("|");
     const type = ruleContent.substring(0, pipeIndex).trim();
     const value = ruleContent.substring(pipeIndex + 1).trim();
     const { value: realValue, condition } = extractIfCondition(value);
+    if (type === "\u6B63\u5219\u66FF\u6362") {
+      const replaced = applyRegexReplaceRule({
+        pattern: trigger,
+        flags: literal?.flags || "",
+        haystack: allPrompts,
+        target: modifiedPrompt,
+        realValue,
+        condition
+      });
+      if (replaced !== null) modifiedPrompt = replaced;
+      continue;
+    }
     const triggers = trigger.split("|").map((t) => t.trim()).filter(Boolean);
     for (const t of triggers) {
       if (allPrompts.toLowerCase().includes(t.toLowerCase())) {
@@ -7154,16 +7210,30 @@ ${rulesText}`);
   const rules = rulesText.split("\n");
   for (const line of rules) {
     if (line.trim() === "") continue;
-    const parts = line.split("=");
+    const literal = parseRegexRuleTrigger(line);
+    const parts = literal ? [literal.pattern, literal.ruleContent] : line.split("=");
     if (parts.length < 2) continue;
-    const trigger = parts[0].trim();
+    const trigger = literal ? literal.pattern : parts[0].trim();
     if (!trigger) continue;
-    const ruleContent = parts.slice(1).join("=");
+    const ruleContent = literal ? literal.ruleContent : parts.slice(1).join("=");
     if (!ruleContent.includes("|")) continue;
     const pipeIndex = ruleContent.indexOf("|");
     const type = ruleContent.substring(0, pipeIndex).trim();
     const value = ruleContent.substring(pipeIndex + 1).trim();
     const { value: realValue, condition } = extractIfCondition(value);
+    if (type === "正则替换") {
+      const replaced = applyRegexReplaceRule({
+        pattern: trigger,
+        flags: literal?.flags || "",
+        haystack: allPrompts,
+        target: modifiedPrompt,
+        realValue,
+        condition,
+        logPrefix: "[Banana] "
+      });
+      if (replaced !== null) modifiedPrompt = replaced;
+      continue;
+    }
     const triggers = trigger.split("|").map((t) => t.trim()).filter(Boolean);
     for (const t of triggers) {
       if (allPrompts.toLowerCase().includes(t.toLowerCase())) {
@@ -7205,16 +7275,31 @@ function prompt_replace_banana_for_character(originalPrompt, fullContext) {
   const rules = rulesText.split("\n");
   for (const line of rules) {
     if (line.trim() === "") continue;
-    const parts = line.split("=");
+    const literal = parseRegexRuleTrigger(line);
+    const parts = literal ? [literal.pattern, literal.ruleContent] : line.split("=");
     if (parts.length < 2) continue;
-    const trigger = parts[0].trim();
+    const trigger = literal ? literal.pattern : parts[0].trim();
     if (!trigger) continue;
-    const ruleContent = parts.slice(1).join("=");
+    const ruleContent = literal ? literal.ruleContent : parts.slice(1).join("=");
     if (!ruleContent.includes("|")) continue;
     const pipeIndex = ruleContent.indexOf("|");
     const type = ruleContent.substring(0, pipeIndex).trim();
     const value = ruleContent.substring(pipeIndex + 1);
     const { value: realValue, condition } = extractIfCondition(value);
+    if (type === "\u6B63\u5219\u66FF\u6362\u5206\u89D2\u8272" || type === "\u6B63\u5219\u66FF\u6362") {
+      const replaced = applyRegexReplaceRule({
+        pattern: trigger,
+        flags: literal?.flags || "",
+        haystack: modifiedPrompt,
+        target: modifiedPrompt,
+        realValue,
+        condition,
+        conditionHaystack: fullContext,
+        logPrefix: "[Banana] \u5206\u89D2\u8272 "
+      });
+      if (replaced !== null) modifiedPrompt = replaced;
+      continue;
+    }
     const triggers = trigger.split("|").map((t) => t.trim()).filter(Boolean);
     for (const t of triggers) {
       if ((type === "\u66FF\u6362\u5206\u89D2\u8272" || type === "\u66FF\u6362") && modifiedPrompt.toLowerCase().includes(t.toLowerCase())) {
@@ -7247,16 +7332,31 @@ ${rulesText}`);
   const rules = rulesText.split("\n");
   for (const line of rules) {
     if (line.trim() === "") continue;
-    const parts = line.split("=");
+    const literal = parseRegexRuleTrigger(line);
+    const parts = literal ? [literal.pattern, literal.ruleContent] : line.split("=");
     if (parts.length < 2) continue;
-    const trigger = parts[0].trim();
+    const trigger = literal ? literal.pattern : parts[0].trim();
     if (!trigger) continue;
-    const ruleContent = parts.slice(1).join("=");
+    const ruleContent = literal ? literal.ruleContent : parts.slice(1).join("=");
     if (!ruleContent.includes("|")) continue;
     const pipeIndex = ruleContent.indexOf("|");
     const type = ruleContent.substring(0, pipeIndex).trim();
     const value = ruleContent.substring(pipeIndex + 1);
     const { value: realValue, condition } = extractIfCondition(value);
+    if (type === "\u6B63\u5219\u66FF\u6362\u5206\u89D2\u8272" || type === "\u6B63\u5219\u66FF\u6362") {
+      const replaced = applyRegexReplaceRule({
+        pattern: trigger,
+        flags: literal?.flags || "",
+        haystack: modifiedPrompt,
+        target: modifiedPrompt,
+        realValue,
+        condition,
+        conditionHaystack: fullContext,
+        logPrefix: "\u5206\u89D2\u8272 "
+      });
+      if (replaced !== null) modifiedPrompt = replaced;
+      continue;
+    }
     const triggers = trigger.split("|").map((t) => t.trim()).filter(Boolean);
     for (const t of triggers) {
       if ((type === "\u66FF\u6362\u5206\u89D2\u8272" || type === "\u66FF\u6362") && modifiedPrompt.toLowerCase().includes(t.toLowerCase())) {
