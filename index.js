@@ -1845,6 +1845,8 @@ var init_config = __esm({
       historyKeepImageTag: false,
       // 仅对生图请求生效：历史消息中保留 <image> 标签原文作为参考（当前正文仍按正则清理）
       enablePregen: "false",
+      thinkTagFormat: "<think></think>",
+      // 流式预生成的思维链过滤格式：一行一组，形如 <think></think>，也可写「开始|结束」
       autoLLMImageGen: "false",
       // 自动LLM请求生图
       imageAlignment: "center",
@@ -45557,6 +45559,7 @@ var init_mainSettingsModule = __esm({
 - clickToPreview: \u5E03\u5C14\u5B57\u7B26\u4E32 "true"/"false", \u5355\u51FB\u56FE\u7247\u9884\u89C8
 - newlineFixEnabled: \u5E03\u5C14\u5B57\u7B26\u4E32 "true"/"false", \u6362\u884C\u4FEE\u590D
 - enablePregen: \u5E03\u5C14\u5B57\u7B26\u4E32 "true"/"false", \u6D41\u5F0F\u9884\u751F\u6210
+- thinkTagFormat: \u5B57\u7B26\u4E32, \u601D\u7EF4\u94FE\u683C\u5F0F\uFF08\u6D41\u5F0F\u9884\u751F\u6210\u8FC7\u6EE4\u7528\uFF0C\u4E00\u884C\u4E00\u7EC4\uFF0C\u5982 <think></think>\uFF0C\u4E5F\u53EF\u5199\u300C\u5F00\u59CB|\u7ED3\u675F\u300D\uFF0C\u7559\u7A7A\u4E0D\u8FC7\u6EE4\uFF09
 - autoLLMImageGen: \u5E03\u5C14\u5B57\u7B26\u4E32 "true"/"false", \u81EA\u52A8LLM\u8BF7\u6C42\u751F\u56FE
 - imageGenInterval: \u6570\u5B57, \u751F\u56FE\u95F4\u9694\u65F6\u95F4\uFF08\u6BEB\u79D2\uFF09
 - randomYushe: \u5E03\u5C14\u5B57\u7B26\u4E32 "true"/"false", \u968F\u673A\u63D0\u793A\u8BCD\u9884\u8BBE\uFF08\u6BCF\u6B21\u751F\u56FE\u968F\u673A\u9009\u62E9\u9884\u8BBE\uFF09
@@ -45590,6 +45593,7 @@ var init_mainSettingsModule = __esm({
 - clickToPreview\uFF08\u5355\u51FB\u56FE\u7247\u9884\u89C8\uFF09\uFF1A\u5F00\u542F\u540E\u5355\u51FB\u56FE\u7247\u4E0A\u534A\u90E8\u5206\uFF0C\u4F1A\u5F39\u51FA\u5927\u56FE\u9884\u89C8\uFF0C\u8FD8\u53EF\u4EE5\u5207\u6362\u67E5\u770B\u5176\u4ED6\u56FE\u7247\u3002
 - newlineFixEnabled\uFF08\u6362\u884C\u4FEE\u590D\uFF09\uFF1A\u4FEE\u590D\u67D0\u4E9B\u60C5\u51B5\u4E0B\u6587\u672C\u6807\u8BB0"###"\u4F1A\u5355\u72EC\u5F00\u4E00\u884C\u7684\u5F02\u5E38\u95EE\u9898\u3002
 - enablePregen\uFF08\u6D41\u5F0F\u9884\u751F\u6210\uFF09\uFF1A\u5728\u6D41\u5F0F\u63A5\u6536\u6D88\u606F\u7684\u8FC7\u7A0B\u4E2D\uFF0C\u63D0\u524D\u5F00\u59CB\u751F\u6210\u56FE\u7247\uFF0C\u51CF\u5C11\u7B49\u5F85\u65F6\u95F4\u3002\uFF08\u4EC5\u4E16\u754C\u4E66\u6A21\u5F0F\u652F\u6301\uFF09
+- thinkTagFormat\uFF08\u601D\u7EF4\u94FE\u683C\u5F0F\uFF09\uFF1A\u6D41\u5F0F\u9884\u751F\u6210\u8BFB\u7684\u662F\u539F\u59CB\u6D41\u5F0F\u6587\u672C\uFF0C\u601D\u8003\u8FC7\u7A0B\u91CC\u7684\u751F\u56FE\u6807\u7B7E\u4E5F\u4F1A\u88AB\u6D3E\u53D1\u51FA\u53BB\u4F46\u6700\u7EC8\u4E0D\u4F1A\u7559\u5728\u6B63\u6587\uFF0C\u767D\u82B1\u989D\u5EA6\u3002\u586B\u4E0A\u601D\u7EF4\u94FE\u6807\u7B7E\u683C\u5F0F\uFF08\u4E00\u884C\u4E00\u7EC4\uFF0C\u5982 <think></think>\uFF09\u5373\u53EF\u6574\u5757\u5254\u9664\uFF1B\u7559\u7A7A\u4E0D\u8FC7\u6EE4\u3002
 - autoLLMImageGen\uFF08\u81EA\u52A8LLM\u8BF7\u6C42\u751F\u56FE\uFF09\uFF1A\u5F00\u542F\u540E\u5F53\u975E\u540C\u5C42\u6D88\u606F\u5339\u914D\u5230\u89E6\u53D1\u6807\u8BB0\u65F6\uFF0C\u81EA\u52A8\u8C03\u7528 LLM \u5C06\u6587\u672C\u53D1\u9001\u7ED9ai\u5E76\u751F\u6210\u56FE\u7247\u63D0\u793A\u8BCD\u3002
 - randomYushe\uFF08\u968F\u673A\u63D0\u793A\u8BCD\u9884\u8BBE\uFF09\uFF1A\u5F00\u542F\u540E\u6BCF\u6B21\u751F\u56FE\u65F6\u4ECE\u6240\u6709\u63D0\u793A\u8BCD\u9884\u8BBE\u4E2D\u968F\u673A\u9009\u62E9\u4E00\u4E2A\u4F7F\u7528\uFF0C\u800C\u975E\u4F7F\u7528\u5F53\u524D\u56FA\u5B9A\u7684\u9884\u8BBE\u3002\u9002\u5408\u5E0C\u671B\u6BCF\u6B21\u751F\u56FE\u98CE\u683C\u591A\u53D8\u7684\u573A\u666F\u3002
 - aiAutonomousResolution\uFF08AI\u81EA\u4E3B\u5206\u8FA8\u7387\uFF09\uFF1A\u5F00\u542F\u540E\uFF0C\u5F53\u751F\u56FE\u811A\u672C\u4ECE\u63D0\u793A\u8BCD\u4E2D\u63D0\u53D6\u5230\u5C3A\u5BF8\uFF08\u5982 832x1216\uFF09\u65F6\uFF0C\u5C06\u81EA\u52A8\u4F7F\u7528\u8BE5\u5C3A\u5BF8\u8986\u76D6\u56FA\u5B9A\u5206\u8FA8\u7387\u8BBE\u7F6E\u3002\u5173\u95ED\u65F6\u4E0D\u518D\u8986\u76D6\uFF0C\u4F46\u4ECD\u4F1A\u4ECE\u63D0\u793A\u8BCD\u4E2D\u5220\u9664\u8BE5\u5C3A\u5BF8\u6807\u8BB0\u3002\u9ED8\u8BA4\u5F00\u542F\u3002
@@ -52074,6 +52078,7 @@ var init_configDescriptions = __esm({
       endTag: "\u56FE\u7247\u89E6\u53D1\u65F6\u7684\u7ED3\u675F\u6807\u8BC6\u7B26\uFF0C\u5982 '###'",
       insertOriginalText: "\u662F\u5426\u5728\u751F\u6210\u7684\u56FE\u7247\u540E\u4FDD\u7559\u63D2\u5165\u539F\u59CB\u5185\u5BB9 (\u5E03\u5C14\u5B57\u7B26\u4E32)",
       enablePregen: "\u662F\u5426\u542F\u7528\u667A\u80FD\u9884\u751F\u6210\u673A\u5236\u4EE5\u52A0\u5FEB\u54CD\u5E94\uFF0C\u5728ai\u6D41\u5F0F\u8FD4\u56DE\u7684\u9014\u4E2D\u6355\u83B7\u751F\u56FE\u5173\u952E\u8BCD\u7ACB\u5373\u9884\u751F\u6210\u56FE\u7247\uFF0C\u52A0\u5FEB\u751F\u56FE\u8FDB\u5EA6\uFF0C\u4EC5\u652F\u6301\u9152\u9986\u5168\u5C40\u4E16\u754C\u4E66\u7684\u6A21\u5F0F (\u5E03\u5C14\u5B57\u7B26\u4E32)",
+      thinkTagFormat: "\u601D\u7EF4\u94FE\u683C\u5F0F\uFF0C\u6D41\u5F0F\u9884\u751F\u6210\u636E\u6B64\u5254\u9664\u601D\u8003\u5185\u5BB9\u91CC\u7684\u751F\u56FE\u6807\u7B7E\uFF0C\u4E00\u884C\u4E00\u7EC4\u5982 <think></think>\uFF0C\u4E5F\u53EF\u5199\u300C\u5F00\u59CB|\u7ED3\u675F\u300D\uFF0C\u7559\u7A7A\u4E0D\u8FC7\u6EE4 (\u5B57\u7B26\u4E32)",
       // 核心生成参数 - 尺寸和步数
       sd_csteps: "Stable Diffusion (SD) \u751F\u6210\u6B65\u6570",
       sd_cwidth: "Stable Diffusion (SD) \u751F\u6210\u5BBD\u5EA6",
@@ -70228,6 +70233,8 @@ async function handleExportLog() {
 `;
   settingsInfo += `- \u542F\u7528\u6D41\u5F0F\u9884\u751F\u6210: ${settings3.enablePregen ? "\u662F" : "\u5426"}
 `;
+  settingsInfo += `- \u601D\u7EF4\u94FE\u683C\u5F0F: ${settings3.thinkTagFormat || "\uFF08\u672A\u8BBE\u7F6E\uFF0C\u4E0D\u8FC7\u6EE4\uFF09"}
+`;
   settingsInfo += `- \u81EA\u52A8LLM\u8BF7\u6C42\u751F\u56FE(\u975E\u540C\u5C42): ${settings3.autoLLMImageGen ? "\u662F" : "\u5426"}
 `;
   settingsInfo += `- \u968F\u673A\u63D0\u793A\u8BCD\u9884\u8BBE: ${settings3.randomYushe ? "\u662F" : "\u5426"}
@@ -83100,6 +83107,23 @@ var SettingsHelpText = {
 - \u4EC5\u652F\u6301**\u9152\u9986\u5168\u5C40\u4E16\u754C\u4E66**\u7684\u89E6\u53D1\u6A21\u5F0F
 - \u9700\u8981\u540E\u7AEF\u54CD\u5E94\u8DB3\u591F\u5FEB\u624D\u80FD\u4F53\u73B0\u4F18\u52BF`
   },
+  thinkTagFormat: {
+    short: "\u6D41\u5F0F\u9884\u751F\u6210\u65F6\uFF0C\u628A\u601D\u7EF4\u94FE\u91CC\u7684\u751F\u56FE\u6807\u7B7E\u6392\u9664\u6389\uFF0C\u907F\u514D\u767D\u70E7\u989D\u5EA6",
+    long: `### \u601D\u7EF4\u94FE\u683C\u5F0F
+
+**\u6D41\u5F0F\u9884\u751F\u6210**\u8BFB\u7684\u662F\u539F\u59CB\u6D41\u5F0F\u6587\u672C\uFF0C\u6A21\u578B\u601D\u8003\u8FC7\u7A0B\u91CC\u51FA\u73B0\u7684\u751F\u56FE\u6807\u7B7E\u4E5F\u4F1A\u88AB\u5F53\u771F\u6D3E\u53D1\u51FA\u53BB\uFF0C
+\u4F46\u8FD9\u4E9B\u6807\u7B7E\u6700\u7EC8\u5E76\u4E0D\u4F1A\u7559\u5728\u6B63\u6587\u91CC\u2014\u2014\u56FE\u767D\u751F\u6210\u4E86\uFF0C\u989D\u5EA6\u4E5F\u767D\u82B1\u4E86\u3002
+
+\u8FD9\u91CC\u586B\u601D\u7EF4\u94FE\u7684\u6807\u7B7E\u683C\u5F0F\uFF0C\u9884\u751F\u6210\u4F1A\u5148\u628A\u5B83\u4EEC\u6574\u5757\u5254\u9664\u518D\u627E\u751F\u56FE\u6807\u7B7E\uFF1A
+
+- **\u4E00\u884C\u4E00\u7EC4**\uFF0C\u53EF\u4EE5\u586B\u591A\u7EC4\uFF08\u4E0D\u540C\u6A21\u578B\u683C\u5F0F\u4E0D\u540C\uFF09
+- \u5F62\u5982 \`<think></think>\`\u3001\`<thinking></thinking>\`
+- \u975E XML \u683C\u5F0F\u53EF\u4EE5\u5199\u6210\u300C\u5F00\u59CB|\u7ED3\u675F\u300D\uFF0C\u4F8B\u5982 \`[\u601D\u8003]|[/\u601D\u8003]\`
+
+\u7559\u7A7A\u5219\u4E0D\u8FC7\u6EE4\u3002**\u5C1A\u672A\u95ED\u5408**\u7684\u601D\u7EF4\u94FE\uFF08\u8FD8\u5728\u601D\u8003\u4E2D\uFF09\u4E5F\u4F1A\u88AB\u6574\u6BB5\u4E22\u5F03\u3002
+
+> \u53EA\u5F71\u54CD\u6D41\u5F0F\u9884\u751F\u6210\uFF0C\u4E0D\u6539\u53D8\u6B63\u6587\u6E32\u67D3\u3002`
+  },
   autoLLMImageGen: {
     short: "\u975E\u540C\u5C42\u6A21\u5F0F\u4E0B\uFF0C\u81EA\u52A8\u8BF7\u6C42 LLM \u751F\u6210\u56FE\u7247\u63D0\u793A\u8BCD",
     long: `### \u81EA\u52A8 LLM \u8BF7\u6C42\u751F\u56FE\uFF08\u975E\u540C\u5C42\uFF09
@@ -84249,7 +84273,7 @@ async function initUI({ check_update: check_update2 }) {
       settings2.theme_id = "\u9ED8\u8BA4-\u767D\u5929";
     }
     applyTheme(settings2.themes[settings2.theme_id]);
-    const mainKeys = ["scriptEnabled", "helpTipsEnabled", "newlineFixEnabled", "mode", "client", "displayMode", "heavyFrontendMode", "insertOriginalText", "dbclike", "collapseImage", "zidongdianji", "zidongdianji2", "longPressToEdit", "clickToPreview", "startTag", "endTag", "cache", "sdUrl", "st_chatu8_sd_auth", "comfyuiUrl", "novelaiApi", "novelaisite", "novelaiOtherSite", "enableCloudQueue", "cloudQueueUrl", "cloudQueueGreeting", "showQueueGreeting", "novelaimode", "novelai_sampler", "Schedule", "nai3Scale", "cfg_rescale", "AI_use_coords", "sm", "dyn", "nai3Variety", "nai3Deceisp", "sd_cwidth", "sd_cheight", "sd_csteps", "sd_cseed", "sdCfgScale", "restoreFaces", "novelai_width", "novelai_height", "novelai_steps", "novelai_seed", "nai3VibeTransfer", "enableVibeGroupTransfer", "randomVibeGroup", "normalizeRefStrength", "InformationExtracted", "ReferenceStrength", "nai3CharRef", "nai3StylePerception", "comfyui_width", "comfyui_height", "comfyui_steps", "comfyui_seed", "cfg_comfyui", "worker", "ipa", "c_fenwei", "c_xijie", "c_quanzhong", "c_idquanzhong", "AQT_sd", "UCP_sd", "AQT_novelai", "UCP_novelai", "AQT_comfyui", "UCP_comfyui", "addFurryDataset", "sd_cupscale_factor", "sd_chires_fix", "sd_chires_steps", "sd_cdenoising_strength", "sd_cclip_skip", "sd_cadetailer", "worldBookEnabled", "ai_temperature", "ai_top_p", "ai_presence_penalty", "ai_frequency_penalty", "ai_stream", "ai_private", "ai_token", "vocabulary_search_startswith", "vocabulary_search_limit", "vocabulary_search_sort", "enablePregen", "autoLLMImageGen", "randomYushe", "aiAutonomousResolution", "imageAlignment", "imageSizeScale", "imageGenInterval", "translation_system_prompt", "ai_test_system", "ai_test_user", "ai_test_output", "jiuguanchucun", "vibeJiuguanchucun", "convertToJpegStorage", "mediaInsertPosition", "weilin_lora_fix"];
+    const mainKeys = ["scriptEnabled", "helpTipsEnabled", "newlineFixEnabled", "mode", "client", "displayMode", "heavyFrontendMode", "insertOriginalText", "dbclike", "collapseImage", "zidongdianji", "zidongdianji2", "longPressToEdit", "clickToPreview", "startTag", "endTag", "cache", "sdUrl", "st_chatu8_sd_auth", "comfyuiUrl", "novelaiApi", "novelaisite", "novelaiOtherSite", "enableCloudQueue", "cloudQueueUrl", "cloudQueueGreeting", "showQueueGreeting", "novelaimode", "novelai_sampler", "Schedule", "nai3Scale", "cfg_rescale", "AI_use_coords", "sm", "dyn", "nai3Variety", "nai3Deceisp", "sd_cwidth", "sd_cheight", "sd_csteps", "sd_cseed", "sdCfgScale", "restoreFaces", "novelai_width", "novelai_height", "novelai_steps", "novelai_seed", "nai3VibeTransfer", "enableVibeGroupTransfer", "randomVibeGroup", "normalizeRefStrength", "InformationExtracted", "ReferenceStrength", "nai3CharRef", "nai3StylePerception", "comfyui_width", "comfyui_height", "comfyui_steps", "comfyui_seed", "cfg_comfyui", "worker", "ipa", "c_fenwei", "c_xijie", "c_quanzhong", "c_idquanzhong", "AQT_sd", "UCP_sd", "AQT_novelai", "UCP_novelai", "AQT_comfyui", "UCP_comfyui", "addFurryDataset", "sd_cupscale_factor", "sd_chires_fix", "sd_chires_steps", "sd_cdenoising_strength", "sd_cclip_skip", "sd_cadetailer", "worldBookEnabled", "ai_temperature", "ai_top_p", "ai_presence_penalty", "ai_frequency_penalty", "ai_stream", "ai_private", "ai_token", "vocabulary_search_startswith", "vocabulary_search_limit", "vocabulary_search_sort", "enablePregen", "thinkTagFormat", "autoLLMImageGen", "randomYushe", "aiAutonomousResolution", "imageAlignment", "imageSizeScale", "imageGenInterval", "translation_system_prompt", "ai_test_system", "ai_test_user", "ai_test_output", "jiuguanchucun", "vibeJiuguanchucun", "convertToJpegStorage", "mediaInsertPosition", "weilin_lora_fix"];
     mainKeys.forEach((key) => {
       const element = document.getElementById(key);
       if (element) {
@@ -85476,6 +85500,7 @@ init_config();
 init_config();
 init_utils();
 init_generation_status();
+init_database();
 
 
 function generateStableId3(str) {
@@ -85487,91 +85512,78 @@ function generateStableId3(str) {
   }
   return "chatu8-id-" + Math.abs(hash).toString(36);
 }
-var pregenQueue = /* @__PURE__ */ new Map();
-var isProcessing = false;
-var TaskStatus2 = {
-  QUEUED: "queued",
-  PROCESSING: "processing",
-  COMPLETED: "completed",
-  FAILED: "failed",
-  CANCELLED: "cancelled"
-};
-async function triggerButtonForTask(task) {
-  const { prompt: prompt2 } = task;
-  return new Promise((resolve, reject) => {
-    if (isGenerating(prompt2)) {
-      addLog(`[Pregen] Image generation is already in progress, skipping: ${prompt2}`);
-      task.status = TaskStatus2.COMPLETED;
-      return resolve();
-    }
-    const requestId = generateStableId3(prompt2);
-    startGenerating(prompt2);
-    const imageResponseHandler = (responseData) => {
-      if (responseData.id !== requestId) return;
-      eventSource38.removeListener(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
-      addLog(`[Pregen] Response listener removed for ID: ${requestId}`);
-      const { success, error, prompt: responsePrompt } = responseData;
-      if (responsePrompt) {
-        stopGenerating(responsePrompt);
-      }
-      if (success) {
-        addLog(`[Pregen] Image generated successfully for: ${responsePrompt}`);
-        task.status = TaskStatus2.COMPLETED;
-        resolve();
-      } else {
-        addLog(`[Pregen] Image generation failed for: ${responsePrompt}. Error: ${error}`);
-        task.status = TaskStatus2.FAILED;
-        reject(new Error(error || "Unknown generation error"));
-      }
-    };
-    eventSource38.on(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
-    addLog(`[Pregen] Response listener created for ID: ${requestId}`);
-    const requestData = { id: requestId, prompt: prompt2 };
-    eventSource38.emit(EventType.GENERATE_IMAGE_REQUEST, requestData);
-    addLog(`[Pregen] Emitted image generation request for ID: ${requestId}`);
-  });
-}
-async function processQueue() {
-  if (isProcessing) return;
-  const nextTask = Array.from(pregenQueue.values()).find((task) => task.status === TaskStatus2.QUEUED);
-  if (!nextTask) {
-    isProcessing = false;
+var PREGEN_RESPONSE_TIMEOUT_MS = 20 * 60 * 1e3;
+var pregenDispatched = /* @__PURE__ */ new Set();
+async function dispatchPregenTask(prompt2) {
+  if (isGenerating(prompt2)) {
+    addLog(`[Pregen] 该标签已在生成中，跳过: ${prompt2}`);
     return;
   }
-  isProcessing = true;
-  nextTask.status = TaskStatus2.PROCESSING;
-  addLog(`[Pregen] \u5F00\u59CB\u5904\u7406\u4EFB\u52A1: ${nextTask.prompt}`);
+  // 预生成是直接向后端发请求，绕过了 triggerGeneration 里的图库快路径，
+  // 不自己查一次就会把历史上出过图的标签全部重烧一遍（费时且烧额度）。
   try {
-    await triggerButtonForTask(nextTask);
+    const [cachedUrl] = await getItemImg(prompt2);
+    if (cachedUrl) {
+      addLog(`[Pregen] 图库已有成品，跳过: ${prompt2}`);
+      return;
+    }
   } catch (error) {
-    console.error(`[Pregen] \u5904\u7406\u4EFB\u52A1\u5931\u8D25 ${nextTask.prompt}:`, error);
-    nextTask.status = TaskStatus2.FAILED;
-  } finally {
-    isProcessing = false;
-    setTimeout(processQueue, 100);
+    addLog(`[Pregen] 查询图库失败，按未缓存处理: ${error?.message || error}`);
   }
+  if (isGenerating(prompt2)) {
+    addLog(`[Pregen] 查库期间主流程已抢先发起，跳过: ${prompt2}`);
+    return;
+  }
+  const requestId = generateStableId3(prompt2);
+  startGenerating(prompt2);
+  let settled = false;
+  let staleTimer = null;
+  const imageResponseHandler = (responseData) => {
+    if (responseData.id !== requestId) return;
+    settled = true;
+    clearTimeout(staleTimer);
+    eventSource38.removeListener(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
+    const { success, error, prompt: responsePrompt } = responseData;
+    // 兜底用 prompt2：取消/异常路径可能回传空 prompt，不清理会让 currentlyGenerating 永久残留，
+    // 之后同一标签的按钮只转圈不发请求。
+    stopGenerating(responsePrompt || prompt2);
+    if (success) {
+      addLog(`[Pregen] 预生成完成: ${responsePrompt || prompt2}`);
+    } else {
+      addLog(`[Pregen] 预生成失败: ${responsePrompt || prompt2}，错误: ${error}`);
+    }
+  };
+  eventSource38.on(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
+  // 后端若从未回响应（例如出图监听器没挂上），生成锁会永久残留，同一标签之后再也发不出请求，
+  // 这里按和陈旧转圈按钮同一口径超时放行。
+  staleTimer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    eventSource38.removeListener(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
+    stopGenerating(prompt2);
+    pregenDispatched.delete(prompt2);
+    addLog(`[Pregen] 等待响应超时，已释放该标签的生成锁: ${prompt2}`);
+  }, PREGEN_RESPONSE_TIMEOUT_MS);
+  eventSource38.emit(EventType.GENERATE_IMAGE_REQUEST, { id: requestId, prompt: prompt2 });
+  addLog(`[Pregen] 已派发预生成请求 (ID: ${requestId}): ${prompt2}`);
 }
 function add(prompts) {
   if (!Array.isArray(prompts)) return;
-  let addedNew = false;
   prompts.forEach((prompt2) => {
-    if (!pregenQueue.has(prompt2)) {
-      pregenQueue.set(prompt2, {
-        prompt: prompt2,
-        status: TaskStatus2.QUEUED
-      });
-      addedNew = true;
-      addLog(`[Pregen] \u6DFB\u52A0\u5230\u961F\u5217: ${prompt2}`);
-    }
+    // 只做去重，不等上一张出完：等完成再发下一个，第二个标签轮到时流式早已结束、
+    // 主流程也已经接管，会被 isGenerating 判为「已在生成」而永远发不出去。
+    if (pregenDispatched.has(prompt2)) return;
+    // 先登记再异步派发：查图库有 await，不同步占位会被后续流式分片重复派发同一标签。
+    pregenDispatched.add(prompt2);
+    dispatchPregenTask(prompt2).catch((error) => {
+      pregenDispatched.delete(prompt2);
+      console.error(`[Pregen] 派发失败 ${prompt2}:`, error);
+    });
   });
-  if (addedNew) {
-    processQueue();
-  }
 }
 function clear() {
-  pregenQueue.clear();
-  isProcessing = false;
-  addLog("[Pregen] \u961F\u5217\u5DF2\u6E05\u7A7A\u3002");
+  pregenDispatched.clear();
+  addLog("[Pregen] 预生成登记表已清空。");
 }
 var pregenManager = {
   add,
@@ -85579,23 +85591,72 @@ var pregenManager = {
 };
 
 // utils/settings/stream_generate.js
+function escapeRegExpForPregen(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function getThinkTagPairs() {
+  const raw = extension_settings101[extensionName]?.thinkTagFormat;
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  const pairs = [];
+  raw.split(/[\r\n]+/).forEach((line) => {
+    const item = line.trim();
+    if (!item) return;
+    let start = "";
+    let end = "";
+    if (item.includes("|")) {
+      const parts = item.split("|");
+      start = (parts[0] || "").trim();
+      end = (parts[1] || "").trim();
+    } else {
+      // <think></think> 这种「开始标签紧跟结束标签」的写法：按结尾的 </xxx> 切开
+      const xmlPair = item.match(/^(.*?)(<\/[^<>]*>)$/);
+      if (xmlPair) {
+        start = xmlPair[1].trim();
+        end = xmlPair[2].trim();
+      }
+    }
+    if (start && end) {
+      pairs.push({ start, end });
+    } else {
+      addLog(`[Pregen] 思维链格式无法解析，已跳过该行: ${item}`);
+    }
+  });
+  return pairs;
+}
+function stripThinkingForPregen(text) {
+  const pairs = getThinkTagPairs();
+  if (!pairs.length) return text;
+  let result = text;
+  for (const { start, end } of pairs) {
+    const s = escapeRegExpForPregen(start);
+    const e = escapeRegExpForPregen(end);
+    // 已闭合的思维链整块去掉
+    result = result.replace(new RegExp(`${s}[\\s\\S]*?${e}`, "gi"), "");
+    // 只回传了结束标记（开始标记被上游吃掉）时，开头到结束标记之间都是思考内容
+    result = result.replace(new RegExp(`^[\\s\\S]*?${e}`, "i"), "");
+    // 还没闭合说明「正在思考中」，尾巴整段丢弃：否则思维链里的标签会被抢先派发出去，
+    // 而它最终并不会出现在正文里，等于白烧一次额度。
+    result = result.replace(new RegExp(`${s}[\\s\\S]*$`, "i"), "");
+  }
+  return result;
+}
 function parsePrompts(text) {
   const settings3 = extension_settings101[extensionName];
   if (!settings3.startTag || !settings3.endTag) return [];
-  const escapeRegExp2 = (string) => {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  };
+  const escapeRegExp2 = escapeRegExpForPregen;
+  const visibleText = stripThinkingForPregen(text);
   const start = escapeRegExp2(settings3.startTag);
   const end = escapeRegExp2(settings3.endTag);
   const pattern = new RegExp(`${start}([\\s\\S]*?)${end}`, "g");
-  const matches = [...text.matchAll(pattern)];
+  const matches = [...visibleText.matchAll(pattern)];
   return matches.map((match) => {
-    let content = match[1].trim().replaceAll("\n", "");
-    content = content.replace(/，/g, ",").replace(/；/g, ";").replace(/：/g, ":");
-    return content;
+    // 必须和 createButtonAtPosition 里 link 的算法逐字一致：requestId 和图库 key 都由它算出，
+    // 差一个字符就会变成「预生成存一份、按钮再重新生成一份」，既白等也白烧一次额度。
+    // 所以这里不能再自作主张把全角标点转半角——主流程并不转。
+    return match[1].trim().replaceAll("《", "<").replaceAll("》", ">").replaceAll("\n", "");
   });
 }
-eventSource39.on(event_types7.generation_started, () => {
+eventSource39.on(event_types7.GENERATION_STARTED, () => {
   if (String(extension_settings101[extensionName].enablePregen) !== "true") return;
   pregenManager.clear();
 });
