@@ -2135,6 +2135,12 @@ var init_config = __esm({
         aspectRatio: "1:1",
         imageSize: "1024x1024",
         useGrokFormat: "false",
+        // \u56FE\u751F\u89C6\u9891\uFF1A\u4E00\u4E2A\u5DE5\u4F5C\u6D41\u91CC\u4E32\u4E86\u751F\u56FE\u4E0E\u751F\u89C6\u9891\u4E24\u6BB5\u65F6\uFF0C\u6B63\u6587\u4F1A\u7ED9\u51FA\u4E24\u6BB5\u63D0\u793A\u8BCD\u3002
+        // \u751F\u56FE\u6BB5\u6CBF\u7528\u5168\u5C40\u7684 startTag/endTag\uFF0C\u89C6\u9891\u6BB5\u7528\u4E0B\u9762\u8FD9\u5BF9\u6807\u8BB0\u5355\u72EC\u6807\u51FA\u3002
+        grokVideoPair: "false",
+        grokVideoStartTag: "video###",
+        grokVideoEndTag: "###",
+        grokVideoPromptKey: "image_prompt",
         conversationPresetId: "\u9ED8\u8BA4",
         editPresetId: "\u9ED8\u8BA4",
         videoPresetId: "\u9ED8\u8BA4",
@@ -35877,6 +35883,8 @@ var init_generation = __esm({
             }
           }
           const requestData = { id: requestId, prompt: requestPrompt, width: finalWidth, height: finalHeight };
+          // 与 {视频} 手动模式无关：这是同一条正文里配对给出的第二段提示词，随请求一起下发。
+          if (button.dataset.pairedVideoPrompt) requestData.pairedVideoPrompt = button.dataset.pairedVideoPrompt;
           if (requestChange) {
             requestData.change = requestChange;
             if (requestChange.includes("{\u4FEE\u56FE}")) {
@@ -36409,6 +36417,33 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
       // 标记为 pattern 匹配，需要替换原文本
     });
   }
+  // 图生视频：正文里与生图提示词并列的第二段。按出现顺序与生图段配对——一条消息里
+  // 通常只有一组；配不上的视频段不会凭空触发生成，只是跟着从正文里抹掉。
+  const bananaPairSettings = settings3.banana || {};
+  const videoPairEnabled = String(bananaPairSettings.grokVideoPair) === "true"
+    && String(bananaPairSettings.useGrokFormat) === "true"
+    && !!bananaPairSettings.grokVideoStartTag
+    && !!bananaPairSettings.grokVideoEndTag;
+  const videoMatches = [];
+  if (videoPairEnabled) {
+    const videoPattern = new RegExp(
+      `${escapeRegExp2(bananaPairSettings.grokVideoStartTag)}([\\s\\S]*?)${escapeRegExp2(bananaPairSettings.grokVideoEndTag)}`,
+      "g"
+    );
+    let videoMatch;
+    while ((videoMatch = videoPattern.exec(logicalText)) !== null) {
+      videoMatches.push({
+        fullMatch: videoMatch[0],
+        content: videoMatch[1].trim(),
+        startIndex: videoMatch.index,
+        endIndex: videoMatch.index + videoMatch[0].length,
+        isVideoPairTag: true
+      });
+    }
+    patternMatches.forEach((item, index) => {
+      item.pairedVideoPrompt = videoMatches[index]?.content || "";
+    });
+  }
   const savedMatches = await getSavedImageMatches(logicalText, rootElement, logicalTextExcludingFirstDiv, firstDivEndOffset > 0 ? firstDivEndOffset : 0);
   if (patternMatches.length === 0 && savedMatches.length === 0) return;
   const clickPromises = [];
@@ -36428,8 +36463,11 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
     );
     clickPromises.push(promise);
   }
-  for (let i = patternMatches.length - 1; i >= 0; i--) {
-    const matchInfo = patternMatches[i];
+  // 视频提示词段和生图段一起按出现顺序倒序处理：必须同一趟倒序，先删靠后的匹配，
+  // 前面那些匹配的文本偏移才不会被删动过的节点带偏。
+  const matchesToProcess = [...patternMatches, ...videoMatches].sort((a, b) => a.startIndex - b.startIndex);
+  for (let i = matchesToProcess.length - 1; i >= 0; i--) {
+    const matchInfo = matchesToProcess[i];
     const nodesToProcess = nodeInfos.filter(
       (info) => matchInfo.startIndex < info.end && matchInfo.endIndex > info.start
     );
@@ -36467,6 +36505,8 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
       continue;
     }
     range.deleteContents();
+    // \u89C6\u9891\u63D0\u793A\u8BCD\u6BB5\u6CA1\u6709\u81EA\u5DF1\u7684\u6309\u94AE\uFF1A\u5B83\u7684\u5185\u5BB9\u5DF2\u7ECF\u6302\u5728\u914D\u5BF9\u7684\u751F\u56FE\u6309\u94AE\u4E0A\uFF0C\u8FD9\u91CC\u53EA\u8D1F\u8D23\u628A\u5B83\u4ECE\u6B63\u6587\u91CC\u62B9\u6389\u3002
+    if (matchInfo.isVideoPairTag) continue;
     const link = matchInfo.content.trim().replaceAll("\u300A", "<").replaceAll("\u300B", ">").replaceAll("\n", "");
     const requestId = generateStableId(link);
     const tagInsertedMarker = `tag-inserted-${requestId}`;
@@ -36498,6 +36538,8 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
     button.dataset.link = link;
     button.dataset.requestId = requestId;
     button.dataset.imageTag = link;
+    // 配对的视频提示词随按钮一起存下来：重新生成、重渲染后再点都拿得到同一段。
+    if (matchInfo.pairedVideoPrompt) button.dataset.pairedVideoPrompt = matchInfo.pairedVideoPrompt;
     let pressTimer = null;
     let isLongPress2 = false;
     const longPressThreshold = 1200;
@@ -63213,7 +63255,7 @@ async function readOpenAIResponse(response) {
     usage: usage || void 0
   };
 }
-async function generateBananaImage({ prompt: prompt2, width, height, change, retouchPrompt, retouchImage, videoPrompt, videoImage }) {
+async function generateBananaImage({ prompt: prompt2, width, height, change, retouchPrompt, retouchImage, videoPrompt, videoImage, pairedVideoPrompt }) {
   clearLog();
   const taskId = taskQueue.addTask({
     name: (prompt2 || "").substring(0, 30) + (prompt2 && prompt2.length > 30 ? "..." : ""),
@@ -63462,6 +63504,17 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
       size: imageSize,
       response_format: "b64_json"
     };
+    // 图生视频：工作流里串了生图与生视频两段，两段提示词得各走各的入口。
+    // 主 prompt 交给视频段——后端把它写进工作流的主提示词节点；生图段改走自定义参数，
+    // 参数名就是后端管理界面里给那个多行文本参数起的名字。只有真的配到第二段时才带 custom，
+    // 其余情况请求体和以前一模一样，换回别的 OpenAI 兼容后端不受影响。
+    const pairedPromptKey = String(bananaSettings.grokVideoPromptKey || "image_prompt").trim();
+    const usePairedVideo = String(bananaSettings.grokVideoPair) === "true" && !!pairedVideoPrompt && !!pairedPromptKey;
+    if (usePairedVideo) {
+      grokPayload.prompt = pairedVideoPrompt;
+      grokPayload.custom = { [pairedPromptKey]: grokFinalPrompt };
+      addLog(`[Banana] 图生视频：视频提示词走 prompt，生图提示词走 custom.${pairedPromptKey}`);
+    }
     const grokRequestUrl = grokDirectUrl;
     const grokRequestHeaders = getDirectHeaders("application/json", `Bearer ${apiKey}`);
     addLog(`[Banana] Grok \u6A21\u5F0F\u53D1\u9001\u8BF7\u6C42\u5230: ${grokRequestUrl}`);
@@ -63959,7 +64012,7 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
 }
 async function bananaGenerate(requestData) {
   clearLog();
-  let { id, prompt: prompt2, width, height, change, retouchPrompt, retouchImage, videoPrompt, videoImage } = requestData;
+  let { id, prompt: prompt2, width, height, change, retouchPrompt, retouchImage, videoPrompt, videoImage, pairedVideoPrompt } = requestData;
   currentRequestId = id;
   currentPrompt = prompt2;
   addLog(`[Banana] Received image generation request (ID: ${id})`);
@@ -64017,7 +64070,7 @@ async function bananaGenerate(requestData) {
     return;
   }
   try {
-    const { image: imageUrl, change: returnedChange, isVideo, format, originalUrl, genParams } = await generateBananaImage({ prompt: prompt2, width, height, change, retouchPrompt, retouchImage, videoPrompt, videoImage });
+    const { image: imageUrl, change: returnedChange, isVideo, format, originalUrl, genParams } = await generateBananaImage({ prompt: prompt2, width, height, change, retouchPrompt, retouchImage, videoPrompt, videoImage, pairedVideoPrompt });
     if (extension_settings47[extensionName].cache != "0") {
       await setItemImg(prompt2, imageUrl, { change: change_, isVideo: isVideo || false, format: format || "image", originalUrl: originalUrl || "", genParams });
       addLog(`\u56FE\u50CF\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
@@ -77185,6 +77238,10 @@ function initBananaUI(settingsModal) {
   const imageSizeSelect = document.getElementById("st-chatu8-banana-image-size-select");
   const imageSizeInput = document.getElementById("st-chatu8-banana-image-size-input");
   const useGrokFormatCheckbox = document.getElementById("st-chatu8-banana-use-grok-format");
+  const videoPairCheckbox = document.getElementById("st-chatu8-banana-video-pair");
+  const videoPairStartInput = document.getElementById("st-chatu8-banana-video-pair-start");
+  const videoPairEndInput = document.getElementById("st-chatu8-banana-video-pair-end");
+  const videoPairKeyInput = document.getElementById("st-chatu8-banana-video-pair-key");
   const editPresetSelect = document.getElementById("st-chatu8-banana-edit-preset");
   const videoModelSelect = document.getElementById("st-chatu8-banana-video-model-select");
   const videoPresetSelect = document.getElementById("st-chatu8-banana-video-preset");
@@ -77606,6 +77663,31 @@ function initBananaUI(settingsModal) {
       saveSettingsDebounced46();
     });
   }
+  if (videoPairCheckbox) {
+    videoPairCheckbox.addEventListener("change", () => {
+      getBananaSettings().grokVideoPair = videoPairCheckbox.checked ? "true" : "false";
+      saveSettingsDebounced46();
+    });
+  }
+  // 标记留空会让正则退化成匹配一切，这里一律回落到默认值，不把空串存进设置。
+  if (videoPairStartInput) {
+    videoPairStartInput.addEventListener("input", () => {
+      getBananaSettings().grokVideoStartTag = videoPairStartInput.value.trim() || "video###";
+      saveSettingsDebounced46();
+    });
+  }
+  if (videoPairEndInput) {
+    videoPairEndInput.addEventListener("input", () => {
+      getBananaSettings().grokVideoEndTag = videoPairEndInput.value.trim() || "###";
+      saveSettingsDebounced46();
+    });
+  }
+  if (videoPairKeyInput) {
+    videoPairKeyInput.addEventListener("input", () => {
+      getBananaSettings().grokVideoPromptKey = videoPairKeyInput.value.trim() || "image_prompt";
+      saveSettingsDebounced46();
+    });
+  }
   if (editPresetSelect) {
     editPresetSelect.addEventListener("change", () => {
       getBananaSettings().editPresetId = editPresetSelect.value;
@@ -77785,6 +77867,18 @@ function initBananaUI(settingsModal) {
   }
   if (useGrokFormatCheckbox) {
     useGrokFormatCheckbox.checked = String(bananaSettings.useGrokFormat) === "true";
+  }
+  if (videoPairCheckbox) {
+    videoPairCheckbox.checked = String(bananaSettings.grokVideoPair) === "true";
+  }
+  if (videoPairStartInput) {
+    videoPairStartInput.value = bananaSettings.grokVideoStartTag || "video###";
+  }
+  if (videoPairEndInput) {
+    videoPairEndInput.value = bananaSettings.grokVideoEndTag || "###";
+  }
+  if (videoPairKeyInput) {
+    videoPairKeyInput.value = bananaSettings.grokVideoPromptKey || "image_prompt";
   }
   const savedVideoModel = bananaSettings.videoModel || "";
   if (videoModelSelect && savedVideoModel) {
