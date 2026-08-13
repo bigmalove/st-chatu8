@@ -85608,7 +85608,7 @@ function generateStableId3(str) {
 }
 var PREGEN_RESPONSE_TIMEOUT_MS = 20 * 60 * 1e3;
 var pregenDispatched = /* @__PURE__ */ new Set();
-async function dispatchPregenTask(prompt2) {
+async function dispatchPregenTask(prompt2, pairedVideoPrompt = "") {
   if (isGenerating(prompt2)) {
     addLog(`[Pregen] 该标签已在生成中，跳过: ${prompt2}`);
     return;
@@ -85658,18 +85658,25 @@ async function dispatchPregenTask(prompt2) {
     pregenDispatched.delete(prompt2);
     addLog(`[Pregen] 等待响应超时，已释放该标签的生成锁: ${prompt2}`);
   }, PREGEN_RESPONSE_TIMEOUT_MS);
-  eventSource38.emit(EventType.GENERATE_IMAGE_REQUEST, { id: requestId, prompt: prompt2 });
+  // requestId 仍只由生图段算出，与主流程的按钮保持同一个 key；视频段只是随行参数。
+  eventSource38.emit(EventType.GENERATE_IMAGE_REQUEST, pairedVideoPrompt
+    ? { id: requestId, prompt: prompt2, pairedVideoPrompt }
+    : { id: requestId, prompt: prompt2 });
   addLog(`[Pregen] 已派发预生成请求 (ID: ${requestId}): ${prompt2}`);
 }
 function add(prompts) {
   if (!Array.isArray(prompts)) return;
-  prompts.forEach((prompt2) => {
+  prompts.forEach((item) => {
+    // 开了图生视频时 parsePrompts 给的是 { prompt, pairedVideoPrompt }，其余情况仍是字符串。
+    const prompt2 = typeof item === "string" ? item : item?.prompt;
+    const pairedVideoPrompt = typeof item === "string" ? "" : item?.pairedVideoPrompt || "";
+    if (!prompt2) return;
     // 只做去重，不等上一张出完：等完成再发下一个，第二个标签轮到时流式早已结束、
     // 主流程也已经接管，会被 isGenerating 判为「已在生成」而永远发不出去。
     if (pregenDispatched.has(prompt2)) return;
     // 先登记再异步派发：查图库有 await，不同步占位会被后续流式分片重复派发同一标签。
     pregenDispatched.add(prompt2);
-    dispatchPregenTask(prompt2).catch((error) => {
+    dispatchPregenTask(prompt2, pairedVideoPrompt).catch((error) => {
       pregenDispatched.delete(prompt2);
       console.error(`[Pregen] 派发失败 ${prompt2}:`, error);
     });
@@ -85743,12 +85750,29 @@ function parsePrompts(text) {
   const end = escapeRegExp2(settings3.endTag);
   const pattern = new RegExp(`${start}([\\s\\S]*?)${end}`, "g");
   const matches = [...visibleText.matchAll(pattern)];
-  return matches.map((match) => {
+  const prompts = matches.map((match) => {
     // 必须和 createButtonAtPosition 里 link 的算法逐字一致：requestId 和图库 key 都由它算出，
     // 差一个字符就会变成「预生成存一份、按钮再重新生成一份」，既白等也白烧一次额度。
     // 所以这里不能再自作主张把全角标点转半角——主流程并不转。
     return match[1].trim().replaceAll("《", "<").replaceAll("》", ">").replaceAll("\n", "");
   });
+  const banana = settings3.banana || {};
+  const videoPairEnabled = String(banana.grokVideoPair) === "true"
+    && String(banana.useGrokFormat) === "true"
+    && !!banana.grokVideoStartTag
+    && !!banana.grokVideoEndTag;
+  if (!videoPairEnabled) return prompts;
+  // 图生视频：生图段往往比视频段先闭合，此刻派发出去就等于把视频提示词丢了。
+  // 因此只派发已经配到视频段的标签，其余的留给后续分片；直到流式结束都没配上的，
+  // 由正文渲染后的主流程接管——最差不过是少一次预生成加速，不会静默少一段提示词。
+  const videoPattern = new RegExp(
+    `${escapeRegExp2(banana.grokVideoStartTag)}([\\s\\S]*?)${escapeRegExp2(banana.grokVideoEndTag)}`,
+    "g"
+  );
+  const videoPrompts = [...visibleText.matchAll(videoPattern)].map((match) => match[1].trim());
+  return prompts
+    .map((prompt2, index) => ({ prompt: prompt2, pairedVideoPrompt: videoPrompts[index] || "" }))
+    .filter((item) => item.pairedVideoPrompt);
 }
 eventSource39.on(event_types7.GENERATION_STARTED, () => {
   if (String(extension_settings101[extensionName].enablePregen) !== "true") return;
