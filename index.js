@@ -36440,7 +36440,10 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
     while ((videoMatch = videoPattern.exec(logicalText)) !== null) {
       videoMatches.push({
         fullMatch: videoMatch[0],
-        content: videoMatch[1].trim(),
+        // 和生图段同一套全角还原：正文是当 HTML 渲染的，`<Picture 1>` 会被当成标签吃掉，
+        // 读 DOM 文本时那一段已经不见了。约定 LLM 写《Picture 1》，取出来再转回尖括号。
+        // 换行照旧保留——视频提示词常是多行运镜描述，而且它不参与 requestId 计算。
+        content: videoMatch[1].trim().replaceAll("《", "<").replaceAll("》", ">"),
         startIndex: videoMatch.index,
         endIndex: videoMatch.index + videoMatch[0].length,
         isVideoPairTag: true
@@ -85774,7 +85777,11 @@ function parsePrompts(text) {
     `${escapeRegExp2(String(banana.grokVideoStartTag || "").trim() || "video###")}([\\s\\S]*?)${escapeRegExp2(String(banana.grokVideoEndTag || "").trim() || "###")}`,
     "g"
   );
-  const videoPrompts = [...visibleText.matchAll(videoPattern)].map((match) => match[1].trim());
+  // 与主流程逐字一致的全角还原：预生成读的是流式原文（尖括号还在），主流程读的是 DOM 文本
+  // （尖括号已被当成标签吃掉）。两边都按《》约定还原，才不会一条链路带着 <Picture 1>、
+  // 另一条丢掉它，同一个标签生成出两种视频提示词。
+  const videoPrompts = [...visibleText.matchAll(videoPattern)]
+    .map((match) => match[1].trim().replaceAll("《", "<").replaceAll("》", ">"));
   return prompts
     .map((prompt2, index) => ({ prompt: prompt2, pairedVideoPrompt: videoPrompts[index] || "" }))
     .filter((item) => item.pairedVideoPrompt);
