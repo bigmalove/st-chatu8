@@ -36419,15 +36419,21 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
   }
   // 图生视频：正文里与生图提示词并列的第二段。按出现顺序与生图段配对——一条消息里
   // 通常只有一组；配不上的视频段不会凭空触发生成，只是跟着从正文里抹掉。
+  // 标记一律按「有值就用、没值回落默认」处理，不能要求设置里必须存着：
+  // 设置是浅合并（{ ...defaultSettings, ...已存设置 }），老用户的 banana 对象会整个盖掉默认值，
+  // 新增的键根本进不去。曾经在这里判空，结果开了开关也识别不到第二段。
   const bananaPairSettings = settings3.banana || {};
+  const videoStartTag = String(bananaPairSettings.grokVideoStartTag || "").trim() || "video###";
+  const videoEndTag = String(bananaPairSettings.grokVideoEndTag || "").trim() || "###";
   const videoPairEnabled = String(bananaPairSettings.grokVideoPair) === "true"
-    && String(bananaPairSettings.useGrokFormat) === "true"
-    && !!bananaPairSettings.grokVideoStartTag
-    && !!bananaPairSettings.grokVideoEndTag;
+    && String(bananaPairSettings.useGrokFormat) === "true";
+  if (String(bananaPairSettings.grokVideoPair) === "true" && String(bananaPairSettings.useGrokFormat) !== "true") {
+    console.warn("[st-chatu8] 已开启图生视频（两段提示词），但「Grok/newapi/openai格式」未开启，第二段提示词不会被识别。");
+  }
   const videoMatches = [];
   if (videoPairEnabled) {
     const videoPattern = new RegExp(
-      `${escapeRegExp2(bananaPairSettings.grokVideoStartTag)}([\\s\\S]*?)${escapeRegExp2(bananaPairSettings.grokVideoEndTag)}`,
+      `${escapeRegExp2(videoStartTag)}([\\s\\S]*?)${escapeRegExp2(videoEndTag)}`,
       "g"
     );
     let videoMatch;
@@ -85756,17 +85762,16 @@ function parsePrompts(text) {
     // 所以这里不能再自作主张把全角标点转半角——主流程并不转。
     return match[1].trim().replaceAll("《", "<").replaceAll("》", ">").replaceAll("\n", "");
   });
+  // 标记同样按「有值就用、没值回落默认」处理，理由见 findAndReplaceInElement 里的说明：
+  // 设置是浅合并，老用户的 banana 对象里没有这几个新键。
   const banana = settings3.banana || {};
-  const videoPairEnabled = String(banana.grokVideoPair) === "true"
-    && String(banana.useGrokFormat) === "true"
-    && !!banana.grokVideoStartTag
-    && !!banana.grokVideoEndTag;
+  const videoPairEnabled = String(banana.grokVideoPair) === "true" && String(banana.useGrokFormat) === "true";
   if (!videoPairEnabled) return prompts;
   // 图生视频：生图段往往比视频段先闭合，此刻派发出去就等于把视频提示词丢了。
   // 因此只派发已经配到视频段的标签，其余的留给后续分片；直到流式结束都没配上的，
   // 由正文渲染后的主流程接管——最差不过是少一次预生成加速，不会静默少一段提示词。
   const videoPattern = new RegExp(
-    `${escapeRegExp2(banana.grokVideoStartTag)}([\\s\\S]*?)${escapeRegExp2(banana.grokVideoEndTag)}`,
+    `${escapeRegExp2(String(banana.grokVideoStartTag || "").trim() || "video###")}([\\s\\S]*?)${escapeRegExp2(String(banana.grokVideoEndTag || "").trim() || "###")}`,
     "g"
   );
   const videoPrompts = [...visibleText.matchAll(videoPattern)].map((match) => match[1].trim());
@@ -86300,6 +86305,12 @@ async function main() {
   ];
   cssFiles.forEach(loadCSS);
   const mergedSettings = { ...JSON.parse(JSON.stringify(defaultSettings)), ...extension_settings102[extensionName] };
+  // 上面是浅合并：已存在的子对象会整个盖掉默认值，之后新增的默认键对老用户永远不生效
+  // （表现为设置面板显示着默认值、实际读到 undefined）。banana 里都是标量配置，逐键补齐是安全的。
+  mergedSettings.banana = {
+    ...JSON.parse(JSON.stringify(defaultSettings.banana)),
+    ...(extension_settings102[extensionName]?.banana || {})
+  };
   if (mergedSettings.chatu8_fab_video_paths) {
     let pathsChanged = false;
     if (mergedSettings.chatu8_fab_video_paths.idle && mergedSettings.chatu8_fab_video_paths.idle.includes(".mp4")) {
