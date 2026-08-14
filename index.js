@@ -2507,7 +2507,8 @@ async function syncIndexToStorage(md5, globalIndex, sortedImages, skipStego = fa
     }
   }
   if (jiuguanStorageModified && !skipStego) {
-    await updateStegoImage();
+    // 后台写：索引同步位于生图链路的收尾处，不能让备份上传挡住给 UI 的完成通知。
+    scheduleStegoSync();
   }
   return correctedIndex;
 }
@@ -3032,8 +3033,59 @@ async function getItemImg(tag, index = null) {
   }
   return [false, false, false, false, ""];
 }
+// 生图链路的分阶段打点：这条链路一旦在某个 await 上卡住，外部只能看到「按钮一直转圈」，
+// 无从判断卡在上传、缩略图、写库、索引同步还是备份。打点后日志能直接指出卡点。
+function makeStageLogger(scope) {
+  let last = Date.now();
+  return (stage) => {
+    const now = Date.now();
+    const cost = now - last;
+    last = now;
+    const line = `[DB] ${scope} → ${stage} (+${cost}ms)`;
+    console.log(line);
+    try {
+      addLog(line);
+    } catch (e) {
+    }
+  };
+}
+// 通知界面不能被持久化链路的挂起卡住。上游 setItemImg 要做上传 / 写 IndexedDB / 索引同步 /
+// 备份，其中任何一步永久挂起都会让 GENERATE_IMAGE_RESPONSE 永远发不出去 —— 表现为
+// 「生成早已完成、数据也在库里，按钮却一直转圈，只能刷新页面才看到」。
+// 超时只记日志、不抛错，底层 promise 继续在后台跑完（不取消），避免丢数据。
+async function persistWithDeadline(promise, label, ms = 2e4) {
+  let timeoutId = null;
+  const guard = new Promise((resolve) => {
+    timeoutId = setTimeout(() => {
+      const line = `[DB] ${label} 存库超过 ${ms}ms，先通知界面显示结果，存库继续在后台进行`;
+      console.warn(line);
+      try {
+        addLog(line);
+      } catch (e) {
+      }
+      resolve("__persist_timeout__");
+    }, ms);
+  });
+  // 后台失败也要留痕，否则「界面上有、库里没有」会变成下一个无声故障；
+  // 同时这个 catch 也避免超时后原 promise 变成 unhandledrejection。
+  promise.catch((error) => {
+    const line = `[DB] ${label} 存库失败: ${error?.message || error}`;
+    console.error(line, error);
+    try {
+      addLog(line);
+    } catch (e) {
+    }
+  });
+  try {
+    return await Promise.race([promise, guard]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
 async function setItemImg(tag, imgBase64, options = { format: "png" }) {
   const { change = "", characterName = "chatu8", filename, format, isVideo = false, originalUrl = "", genParams = null } = options;
+  const stage = makeStageLogger(`setItemImg(${isVideo ? "video" : "image"})`);
+  stage("开始");
   if (extension_settings[extensionName].jiuguanchucun === "true") {
     const md5 = CryptoJS.MD5(tag).toString();
     const uuid = generateUUID();
@@ -3074,6 +3126,7 @@ async function setItemImg(tag, imgBase64, options = { format: "png" }) {
       }
       const result = await response.json();
       const imagePath = result.path;
+      stage("媒体已上传酒馆");
       let thumbnailPath = null;
       let thumbnailSize = 0;
       try {
@@ -3112,6 +3165,7 @@ async function setItemImg(tag, imgBase64, options = { format: "png" }) {
       } catch (thumbnailError) {
         console.error("Failed to create or upload thumbnail:", thumbnailError);
       }
+      stage("缩略图处理完毕");
       if (!extension_settings[extensionName].jiuguanStorage) {
         extension_settings[extensionName].jiuguanStorage = {};
       }
@@ -3149,10 +3203,13 @@ async function setItemImg(tag, imgBase64, options = { format: "png" }) {
       }
       await syncIndexToStorage(md5, newIndex, merged.images, true);
       saveSettingsDebounced();
+      stage("索引同步完毕（此刻已可被 getItemImg 读到）");
       await new Promise((resolve) => setTimeout(resolve, 50));
       if (!window.imagesid) window.imagesid = {};
       window.imagesid[md5] = newDate;
-      await updateStegoImage();
+      // 后台写：备份上传不能挡住给 UI 的完成通知，否则数据明明已落地、按钮却一直转圈。
+      scheduleStegoSync();
+      stage("完成（隐写备份已转后台）");
       return imagePath;
     } catch (error) {
       console.error("Failed to upload image to server:", error);
@@ -3178,7 +3235,9 @@ async function setItemImg(tag, imgBase64, options = { format: "png" }) {
     } catch (error) {
       console.error("Failed to create or store thumbnail:", error);
     }
+    stage("缩略图处理完毕");
     await storeReadWrite({ id: uuid, data: imageBuffer });
+    stage(`媒体已写入 IndexedDB (${imageBuffer.byteLength} 字节)`);
     const metadata = await getMetadata();
     const entry = metadata[md5];
     const newImageEntry = {
@@ -3205,6 +3264,7 @@ async function setItemImg(tag, imgBase64, options = { format: "png" }) {
       };
     }
     await setMetadata(metadata);
+    stage("元数据已写入（此刻已可被 getItemImg 读到）");
     const merged = await getMergedAndSortedImages(md5);
     let newIndex = merged.images.findIndex((img) => img.uuid === uuid);
     if (newIndex === -1) {
@@ -3213,6 +3273,7 @@ async function setItemImg(tag, imgBase64, options = { format: "png" }) {
     await syncIndexToStorage(md5, newIndex, merged.images);
     if (!window.imagesid) window.imagesid = {};
     window.imagesid[md5] = newDate;
+    stage("完成");
     return "indexeddb_saved";
   }
 }
@@ -3282,6 +3343,12 @@ async function openDB() {
       console.error("[DB] \u6253\u5F00\u6570\u636E\u5E93\u5931\u8D25:", event.target.error);
       reject(event.target.error);
     };
+    // \u88AB\u5176\u5B83\u8FDE\u63A5\u963B\u585E\u65F6\u53EA\u4F1A\u89E6\u53D1 blocked\uFF0Csuccess/error \u90FD\u4E0D\u4F1A\u6765\u3002\u4E0D\u5904\u7406\u5C31\u662F\u6C38\u4E45\u6302\u8D77\uFF0C
+    // \u4F1A\u628A\u300C\u5148\u5B58\u5E93\u3001\u540E\u901A\u77E5 UI\u300D\u7684\u6574\u6761\u94FE\u8DEF\u9501\u6B7B\uFF08\u6309\u94AE\u6C38\u8FDC\u8F6C\u5708\uFF0C\u53EA\u80FD\u5237\u65B0\u9875\u9762\uFF09\u3002
+    request.onblocked = () => {
+      console.error("[DB] \u6253\u5F00\u6570\u636E\u5E93\u88AB\u963B\u585E\uFF08\u5176\u5B83\u6807\u7B7E\u9875\u6301\u6709\u65E7\u7248\u672C\u8FDE\u63A5\uFF09");
+      reject(new Error("IndexedDB \u6253\u5F00\u88AB\u963B\u585E\uFF0C\u8BF7\u5173\u95ED\u5176\u5B83 SillyTavern \u6807\u7B7E\u9875\u540E\u91CD\u8BD5"));
+    };
     request.onsuccess = (event) => {
       db = event.target.result;
       console.log(`[DB] \u6570\u636E\u5E93 '${dbName}' v${dbVersion} \u6253\u5F00\u6210\u529F\u3002`);
@@ -3289,15 +3356,39 @@ async function openDB() {
     };
   });
 }
+// IndexedDB 的 request 回调在「事务被中止」时根本不会触发 —— 配额压力、浏览器回收内存、
+// 连接被 versionchange 关闭都走 transaction.onabort。只监听 request 的话 Promise 永不 settle，
+// 会把 setItemImg 这条「先存库、后通知 UI」的链路锁死，表现为按钮永远转圈、必须刷新页面才看到结果。
+// 视频（几 MB ArrayBuffer + 每次全量重写元数据）正是最容易触发中止的场景。
+function awaitIdbRequest(transaction, request, label, timeoutMs = 3e4) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutId = null;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      fn(arg);
+    };
+    // 兜底超时：任何未预见的挂起都宁可报错，也不能无声无息卡死调用方。
+    timeoutId = setTimeout(() => {
+      finish(reject, new Error(`IndexedDB ${label} 超时（${timeoutMs}ms）`));
+    }, timeoutMs);
+    request.onsuccess = (event) => finish(resolve, event.target.result);
+    request.onerror = () => finish(reject, request.error || new Error(`IndexedDB ${label} 失败`));
+    transaction.onabort = () => finish(reject, transaction.error || new Error(`IndexedDB ${label} 事务被中止`));
+    transaction.onerror = () => finish(reject, transaction.error || new Error(`IndexedDB ${label} 事务出错`));
+  });
+}
 async function storeReadWrite(data) {
   const dbInstance = db || await openDB();
   const transaction = dbInstance.transaction([objectStoreName], "readwrite");
   const objectStore = transaction.objectStore(objectStoreName);
-  return new Promise((resolve, reject) => {
-    const request = objectStore.put(data);
-    request.onsuccess = () => resolve();
-    request.onerror = (event) => reject(event.target.error);
-  });
+  // 写入放宽到 60s：视频是几 MB 的 ArrayBuffer，慢设备上正常写入也可能耗时较久。
+  return awaitIdbRequest(transaction, objectStore.put(data), `写入 ${data?.id || ""}`.trim(), 6e4);
 }
 async function getManualTags() {
   const db2 = await openDB();
@@ -3348,21 +3439,13 @@ async function storeReadOnly(id) {
   const db2 = await openDB();
   const transaction = db2.transaction([objectStoreName], "readonly");
   const objectStore = transaction.objectStore(objectStoreName);
-  return new Promise((resolve, reject) => {
-    const request = objectStore.get(id);
-    request.onsuccess = (event) => resolve(event.target.result);
-    request.onerror = (event) => reject(event.target.error);
-  });
+  return awaitIdbRequest(transaction, objectStore.get(id), `读取 ${id || ""}`.trim());
 }
 async function storeDelete(id) {
   const dbInstance = db || await openDB();
   const transaction = dbInstance.transaction([objectStoreName], "readwrite");
   const objectStore = transaction.objectStore(objectStoreName);
-  return new Promise((resolve, reject) => {
-    const request = objectStore.delete(id);
-    request.onsuccess = () => resolve();
-    request.onerror = (event) => reject(event.target.error);
-  });
+  return awaitIdbRequest(transaction, objectStore.delete(id), `删除 ${id || ""}`.trim());
 }
 async function getMetadata() {
   const data = await storeReadOnly(metadataId);
@@ -5015,6 +5098,28 @@ async function createStegoImage() {
     console.error("[Stego] \u521B\u5EFA\u9690\u5199\u56FE\u7247\u5931\u8D25:", error);
     throw error;
   }
+}
+var stegoSyncState = { running: false, pending: false };
+// 隐写图只是 jiuguanStorage 的二级镜像（实测 0.4MB+ JSON，每次都要先 delete 再全量 upload）。
+// 以前在生图关键路径上同步 await 它，网络或酒馆服务端一慢就把 GENERATE_IMAGE_RESPONSE 一起拖住，
+// 表现为「生成其实早就完成，按钮却一直转圈，刷新后才看到结果」。改成后台串行执行：
+// 已在跑时只记一个「末位待办」，连续生成会自动合并成一次上传，不再重复搬同一份数据。
+function scheduleStegoSync() {
+  if (stegoSyncState.running) {
+    stegoSyncState.pending = true;
+    return;
+  }
+  stegoSyncState.running = true;
+  void (async () => {
+    try {
+      do {
+        stegoSyncState.pending = false;
+        await updateStegoImage();
+      } while (stegoSyncState.pending);
+    } finally {
+      stegoSyncState.running = false;
+    }
+  })();
 }
 async function updateStegoImage() {
   const stego = new ImageSteganography();
@@ -35516,21 +35621,109 @@ function resetLoadingButton(button) {
   const link = button.dataset.link;
   if (!link) return;
   stopGenerating(link);
-  const requestId = button.dataset.requestId;
-  const anchorSpan = button.nextElementSibling;
-  if (!anchorSpan?.classList?.contains("st-chatu8-image-span")) return;
-  if (hasRenderedMedia(anchorSpan, requestId)) return;
-  // 生成其实早已成功并写入数据库，只是 UI 那一步没跑完 —— 直接从数据库补渲染。
-  getItemImg(link).then(([imageUrl, change, , isVideo, originalUrl]) => {
-    if (!imageUrl || hasRenderedMedia(anchorSpan, requestId)) return;
-    const target = resolveMediaContainer(button.ownerDocument, anchorSpan, requestId, getInsertMode());
-    createAndShowImage(target, imageUrl, "Generated Image", button, change, isVideo, originalUrl || "");
-    if (extension_settings40[extensionName].dbclike === "true") {
-      button.style.setProperty("display", "none", "important");
+  // 生成其实可能早已成功并写入数据库，只是通知那一步没跑完 —— 统一交给补渲染兜底，
+  // 它比原来「只看 button.nextElementSibling」更鲁棒（非默认插入位置时媒体不在 span 里）。
+  void hydrateMissingMedia();
+}
+function collectMediaDocuments() {
+  const docs = [document];
+  for (const frame of Array.from(document.querySelectorAll("iframe"))) {
+    try {
+      if (frame.contentDocument) docs.push(frame.contentDocument);
+    } catch (e) {
     }
-  }).catch((e) => {
-    console.warn("[st-chatu8] 陈旧按钮补渲染失败:", e);
-  });
+  }
+  return docs;
+}
+function isRequestRendered(requestId) {
+  for (const doc of collectMediaDocuments()) {
+    for (const span of doc.querySelectorAll(`.st-chatu8-image-span[data-request-id="${requestId}"]`)) {
+      if (hasRenderedMedia(span, requestId)) return true;
+    }
+  }
+  return false;
+}
+// 「有按钮但没有媒体」这个状态以前完全无法自愈：findAndReplaceInElement 在 chatu8Processed
+// 且已有按钮时直接早退，getSavedImageMatches 见到楼层已有媒体容器就返回空，
+// createButtonAtPosition 遇到已存在的按钮也直接跳过 —— 三道守卫都不从数据库补渲染，
+// 于是结果明明已经存好了，界面上却只能靠刷新页面才出现。
+// 这里刻意绕开整条重扫链路，直接按锚点 span 去数据库取一次补上。
+async function hydrateMissingMedia() {
+  if (hydrateState.running) return 0;
+  hydrateState.running = true;
+  let filled = 0;
+  try {
+    const insertMode = getInsertMode();
+    for (const doc of collectMediaDocuments()) {
+      for (const span of Array.from(doc.querySelectorAll(".st-chatu8-image-span[data-request-id]"))) {
+        const requestId = span.dataset.requestId;
+        if (!requestId || hasRenderedMedia(span, requestId)) continue;
+        const prevEl = span.previousElementSibling;
+        const button = prevEl?.matches?.(`button.image-tag-button[data-request-id="${requestId}"]`) ? prevEl : doc.querySelector(`button.image-tag-button[data-request-id="${requestId}"]`);
+        const link = button?.dataset?.link;
+        if (!link) continue;
+        try {
+          const [imageUrl, change, , isVideo, originalUrl] = await getItemImg(link);
+          if (!imageUrl || hasRenderedMedia(span, requestId)) continue;
+          const target = resolveMediaContainer(doc, span, requestId, insertMode);
+          createAndShowImage(target, imageUrl, "Generated Image", button, change, isVideo, originalUrl || "");
+          filled++;
+          // 只复位「已经等了一会儿」的按钮：刚发起的生成不能被兜底逻辑提前判成完成。
+          const since = Number(button.dataset.loadingSince || 0);
+          if (!button.hasAttribute("data-loading") || since > 0 && Date.now() - since > HYDRATE_MIN_LOADING_AGE_MS) {
+            button.removeAttribute("data-loading");
+            delete button.dataset.loadingSince;
+            if (extension_settings40[extensionName].dbclike === "true") {
+              button.style.setProperty("display", "none", "important");
+            } else {
+              button.disabled = false;
+              button.textContent = "生成图片";
+            }
+          }
+        } catch (e) {
+          console.warn("[st-chatu8] 补渲染媒体失败:", e);
+        }
+      }
+    }
+    if (filled > 0) {
+      const line = `[st-chatu8] 已从数据库补渲染 ${filled} 个媒体（无需刷新页面）`;
+      console.log(line);
+      try {
+        addLog(line);
+      } catch (e) {
+      }
+    }
+  } finally {
+    hydrateState.running = false;
+  }
+  return filled;
+}
+function stopResultWatchdog(requestId) {
+  const timer = resultWatchdogs.get(requestId);
+  if (timer) {
+    clearInterval(timer);
+    resultWatchdogs.delete(requestId);
+  }
+}
+// 看门狗：完成通知一旦因任何原因丢失（存库链路挂起、监听器被换掉、DOM 被重建），
+// 结果也得自己出现，而不是让用户一直看着转圈直到刷新页面。
+// 它只从数据库补渲染、绝不中断正在跑的生成，所以对耗时很久的视频工作流是安全的。
+function startResultWatchdog(requestId) {
+  if (!requestId || resultWatchdogs.has(requestId)) return;
+  const startedAt = Date.now();
+  const tick = async () => {
+    if (isRequestRendered(requestId) || Date.now() - startedAt > LOADING_STALE_TIMEOUT_MS) {
+      stopResultWatchdog(requestId);
+      return;
+    }
+    await hydrateMissingMedia();
+    if (isRequestRendered(requestId)) {
+      stopResultWatchdog(requestId);
+    }
+  };
+  resultWatchdogs.set(requestId, setInterval(() => {
+    void tick();
+  }, RESULT_WATCHDOG_INTERVAL_MS));
 }
 function resolveMediaContainer(doc, anchorSpan, requestId, insertMode) {
   if (!anchorSpan || !insertMode || insertMode === "default") return anchorSpan;
@@ -35762,6 +35955,11 @@ function createAndShowImage(container, imageUrl, alt, button, change, isVideo = 
 var _showImagePreview, triggerGeneration;
 var pendingResponseHandlers = /* @__PURE__ */ new Map();
 var LOADING_STALE_TIMEOUT_MS = 20 * 60 * 1e3;
+var hydrateState = { running: false };
+var resultWatchdogs = /* @__PURE__ */ new Map();
+var RESULT_WATCHDOG_INTERVAL_MS = 30 * 1e3;
+// 补渲染兜底不能误伤刚发起的生成：只有转圈超过这个时长的按钮才允许被兜底复位。
+var HYDRATE_MIN_LOADING_AGE_MS = 20 * 1e3;
 var init_generation = __esm({
   "utils/iframe/generation.js"() {
     init_config();
@@ -35836,9 +36034,15 @@ var init_generation = __esm({
               });
             }
           });
+          if (success && inserted) {
+            // 正常路径已经把媒体放上去了，看门狗没必要再轮询。
+            stopResultWatchdog(requestId);
+          }
           if (success && !inserted) {
-            // 响应到达时 DOM 里还没有目标元素（流式重渲染中途），触发一次重扫从数据库补渲染。
+            // 响应到达时 DOM 里还没有目标元素（流式重渲染中途）。重扫在「按钮已存在」时会被
+            // 三道守卫挡掉，所以除了触发重扫，还要直接走一次补渲染。
             requestPlaceholderReprocess();
+            void hydrateMissingMedia();
           }
         };
         if (!pendingResponseHandlers.has(requestId)) {
@@ -35848,8 +36052,12 @@ var init_generation = __esm({
           eventSource18.on(EventType.GENERATE_IMAGE_RESPONSE, imageResponseHandler);
           addLog(`图像响应监听器已创建 (ID: ${requestId})`);
         }
-        if (alreadyGenerating && !button.dataset.loadingSince) {
-          button.dataset.loadingSince = String(Date.now());
+        if (alreadyGenerating) {
+          if (!button.dataset.loadingSince) {
+            button.dataset.loadingSince = String(Date.now());
+          }
+          // 请求已经在跑（按钮是被重建后重新挂上来的），同样需要兜底看门狗。
+          startResultWatchdog(requestId);
         }
         if (!alreadyGenerating) {
           button.setAttribute("data-loading", "true");
@@ -35900,6 +36108,8 @@ var init_generation = __esm({
           }
           eventSource18.emit(EventType.GENERATE_IMAGE_REQUEST, requestData);
           addLog(`\u53D1\u51FA\u56FE\u50CF\u751F\u6210\u8BF7\u6C42 (ID: ${requestData.id})`);
+          // \u7ED3\u679C\u6700\u7EC8\u4E00\u81F4\u7684\u515C\u5E95\uFF1A\u901A\u77E5\u4E22\u4E86\u4E5F\u80FD\u81EA\u5DF1\u628A\u5A92\u4F53\u8865\u4E0A\uFF0C\u4E0D\u5FC5\u5237\u65B0\u9875\u9762\u3002
+          startResultWatchdog(requestData.id);
         }
       };
       const docs = [document, ...Array.from(document.querySelectorAll("iframe")).map((f) => f.contentDocument).filter(Boolean)];
@@ -37980,7 +38190,7 @@ function initializeImageProcessing() {
   }
   initializeMainDocumentObserver();
 }
-var autoClickTimer, iframeObserverState, mainDocumentObserver, PLUGIN_MANAGED_SELECTOR, debouncedProcessVisible;
+var autoClickTimer, iframeObserverState, mainDocumentObserver, PLUGIN_MANAGED_SELECTOR, debouncedProcessVisible, debouncedHydrateMedia;
 var init_iframe = __esm({
   "utils/iframe/index.js"() {
     init_config();
@@ -38004,6 +38214,23 @@ var init_iframe = __esm({
       processMesTextElements();
       processIframes();
     }, 200);
+    // 主文档一直缺少重扫时机：mainDocumentObserver 只对 iframe 增删响应，也没有滚动监听，
+    // 所以酒馆重建 .mes_text（新消息、编辑、swipe、切换聊天）之后没有任何东西会把媒体补回来。
+    // 这里挂上补渲染（轻量，只在数据库里确实有数据时才动 DOM），不做全量重扫。
+    debouncedHydrateMedia = debounce(() => {
+      void hydrateMissingMedia();
+    }, 300);
+    for (const evt of [
+      event_types4.CHARACTER_MESSAGE_RENDERED,
+      event_types4.USER_MESSAGE_RENDERED,
+      event_types4.MESSAGE_UPDATED,
+      event_types4.MESSAGE_SWIPED,
+      event_types4.CHAT_CHANGED
+    ]) {
+      if (evt) {
+        eventSource21.on(evt, () => debouncedHydrateMedia());
+      }
+    }
     eventSource21.on(event_types4.GENERATION_ENDED, async (data) => {
       window.zidongdianji = true;
       if (autoClickTimer) {
@@ -63102,7 +63329,7 @@ async function comfyuigenerate(requestData) {
   try {
     const { image: imageUrl, change: returnedChange, isVideo, format, genParams } = await generateComfyUIImage({ prompt: prompt2, width, height, change, extraNegativePrompt });
     if (extension_settings46[extensionName].cache != "0") {
-      await setItemImg(prompt2, imageUrl, { change: returnedChange, isVideo, format, genParams });
+      await persistWithDeadline(setItemImg(prompt2, imageUrl, { change: returnedChange, isVideo, format, genParams }), "comfyui");
       addLog(`${isVideo ? "\u89C6\u9891" : "\u56FE\u50CF"}\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
     } else {
       addLog(`\u7F13\u5B58\u8BBE\u7F6E\u4E3A\u4E0D\u5B58\u5165\u6570\u636E\u5E93`);
@@ -63559,6 +63786,9 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
           imageUrl = `data:${detectedMime};base64,${item.b64_json}`;
           isVideoContent = true;
           videoFormat = detectedMime;
+          // \u670D\u52A1\u7AEF\u56DE\u4F20 b64_json \u7684\u540C\u65F6\u4E5F\u7ED9\u4E86 url\uFF0C\u91C7\u96C6\u4E0B\u6765\u5F53\u64AD\u653E\u5907\u7528\u6E90\uFF1A\u89C6\u9891 data URL \u52A8\u8F84\u51E0 MB\uFF0C
+          // blob \u64AD\u653E\u5931\u8D25\u65F6\u53EF\u4EE5\u76F4\u63A5\u56DE\u9000\u5230 HTTP \u76F4\u94FE\uFF0C\u800C\u4E0D\u662F\u53EA\u80FD\u5F39\u300C\u65E0\u6CD5\u64AD\u653E\u300D\u3002
+          videoOriginalUrl = typeof item.url === "string" ? item.url : "";
           addLog(`[Banana] Grok \u6A21\u5F0F\uFF1A\u4ECE b64_json \u68C0\u6D4B\u5230\u89C6\u9891 (${detectedMime})`);
         } else {
           const imageMime = detectedMime.startsWith("image/") ? detectedMime : "image/png";
@@ -64047,7 +64277,7 @@ async function bananaGenerate(requestData) {
       const { image: imageUrl, change: returnedChange, isVideo, format, genParams } = await generateComfyUIImage({ prompt: prompt2, width, height, change, extraNegativePrompt: void 0 });
       const cleanedChange = returnedChange.replaceAll("{ComfyUI\u5C40\u90E8\u91CD\u7ED8}", "");
       if (extension_settings47[extensionName].cache != "0") {
-        await setItemImg(prompt2, imageUrl, { change: cleanedChange, genParams });
+        await persistWithDeadline(setItemImg(prompt2, imageUrl, { change: cleanedChange, genParams }), "banana");
         addLog(`\u56FE\u50CF\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
       } else {
         addLog(`\u7F13\u5B58\u8BBE\u7F6E\u4E3A\u4E0D\u5B58\u5165\u6570\u636E\u5E93`);
@@ -64081,7 +64311,7 @@ async function bananaGenerate(requestData) {
   try {
     const { image: imageUrl, change: returnedChange, isVideo, format, originalUrl, genParams } = await generateBananaImage({ prompt: prompt2, width, height, change, retouchPrompt, retouchImage, videoPrompt, videoImage, pairedVideoPrompt });
     if (extension_settings47[extensionName].cache != "0") {
-      await setItemImg(prompt2, imageUrl, { change: change_, isVideo: isVideo || false, format: format || "image", originalUrl: originalUrl || "", genParams });
+      await persistWithDeadline(setItemImg(prompt2, imageUrl, { change: change_, isVideo: isVideo || false, format: format || "image", originalUrl: originalUrl || "", genParams }), "banana");
       addLog(`\u56FE\u50CF\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
       if (extension_settings47[extensionName].banana.cishu) {
         extension_settings47[extensionName].banana.cishu = extension_settings47[extensionName].banana.cishu + 1;
@@ -64551,7 +64781,7 @@ async function sdGenerate(requestData) {
       const { image: imageUrl, change: returnedChange, isVideo, format, genParams } = await generateComfyUIImage({ prompt: prompt2, width, height, change, extraNegativePrompt });
       const cleanedChange = returnedChange.replaceAll("{ComfyUI\u5C40\u90E8\u91CD\u7ED8}", "");
       if (extension_settings48[extensionName].cache != "0") {
-        await setItemImg(prompt2, imageUrl, { change: cleanedChange, genParams });
+        await persistWithDeadline(setItemImg(prompt2, imageUrl, { change: cleanedChange, genParams }), "sd");
         addLog(`\u56FE\u50CF\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
       } else {
         addLog(`\u7F13\u5B58\u8BBE\u7F6E\u4E3A\u4E0D\u5B58\u5165\u6570\u636E\u5E93`);
@@ -64585,7 +64815,7 @@ async function sdGenerate(requestData) {
   try {
     const { image: imageUrl, change: returnedChange, genParams } = await generateSDImage({ prompt: prompt2, width, height, change, extraNegativePrompt });
     if (extension_settings48[extensionName].cache != "0") {
-      await setItemImg(prompt2, imageUrl, { change: returnedChange, genParams });
+      await persistWithDeadline(setItemImg(prompt2, imageUrl, { change: returnedChange, genParams }), "sd");
       addLog(`\u56FE\u50CF\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
     } else {
       addLog(`\u7F13\u5B58\u8BBE\u7F6E\u4E3A\u4E0D\u5B58\u5165\u6570\u636E\u5E93`);
@@ -69152,7 +69382,7 @@ async function novelaigenerate(requestData) {
       const cleanedChange = returnedChange.replaceAll("{ComfyUI\u5C40\u90E8\u91CD\u7ED8}", "");
       try {
         if (extension_settings52[extensionName].cache != "0") {
-          await setItemImg(prompt2, imageUrl, { change: cleanedChange, isVideo, format, genParams });
+          await persistWithDeadline(setItemImg(prompt2, imageUrl, { change: cleanedChange, isVideo, format, genParams }), "novelai");
           addLog(`\u56FE\u50CF\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
         } else {
           addLog(`\u7F13\u5B58\u8BBE\u7F6E\u4E3A\u4E0D\u5B58\u5165\u6570\u636E\u5E93`);
@@ -69184,7 +69414,7 @@ async function novelaigenerate(requestData) {
       const cleanedChange = returnedChange.replaceAll("{NovelAI\u5C40\u90E8\u91CD\u7ED8}", "");
       try {
         if (extension_settings52[extensionName].cache != "0") {
-          await setItemImg(prompt2, imageUrl, { change: cleanedChange, genParams });
+          await persistWithDeadline(setItemImg(prompt2, imageUrl, { change: cleanedChange, genParams }), "novelai");
           addLog(`\u56FE\u50CF\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
         } else {
           addLog(`\u7F13\u5B58\u8BBE\u7F6E\u4E3A\u4E0D\u5B58\u5165\u6570\u636E\u5E93`);
@@ -69236,7 +69466,7 @@ async function novelaigenerate(requestData) {
     const { image: imageUrl, change: returnedChange, genParams } = await generateNovelAIImage({ prompt: prompt2, width, height, change, extraNegativePrompt });
     try {
       if (extension_settings52[extensionName].cache != "0") {
-        await setItemImg(prompt2, imageUrl, { change: returnedChange, genParams });
+        await persistWithDeadline(setItemImg(prompt2, imageUrl, { change: returnedChange, genParams }), "novelai");
         addLog(`\u56FE\u50CF\u5DF2\u5B58\u5165\u6570\u636E\u5E93 for prompt: ${prompt2}`);
       } else {
         addLog(`\u7F13\u5B58\u8BBE\u7F6E\u4E3A\u4E0D\u5B58\u5165\u6570\u636E\u5E93`);
