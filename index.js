@@ -13611,9 +13611,13 @@ async function insertImagesIntoElement(rootElement, images) {
   existingContainers.forEach((container) => container.remove());
   const existingCollapseWrappers = rootElement.querySelectorAll(".st-chatu8-collapse-wrapper");
   existingCollapseWrappers.forEach((wrapper) => wrapper.remove());
+  // \u975E\u9ED8\u8BA4\u63D2\u5165\u4F4D\u7F6E\u65F6\u5A92\u4F53\u69FD\u4F4D\u6302\u5728 .mes \u4E0A\uFF0C\u4E0D\u5728 rootElement(=mes_text) \u91CC\uFF0C\u4E0A\u9762\u51E0\u884C\u626B\u4E0D\u5230\u5B83\u3002
+  // \u6F0F\u6389\u7684\u8BDD\u91CD\u65B0\u751F\u6210\u4E4B\u540E\u65E7\u5A92\u4F53\u4F1A\u4E00\u76F4\u6302\u5728\u697C\u5C42\u4E0A\uFF0C\u8FD8\u4F1A\u88AB\u53BB\u91CD\u903B\u8F91\u5F53\u6210\u300C\u8FD9\u6807\u7B7E\u5DF2\u7ECF\u6709\u5A92\u4F53\u4E86\u300D\u3002
+  const existingSlots = rootElement.closest?.(".mes")?.querySelectorAll(".st-chatu8-media-slot") || [];
+  existingSlots.forEach((slot) => slot.remove());
   debugLog("imageInserter.insertImagesIntoElement", "\u6E05\u7406\u65E7\u5143\u7D20\u5B8C\u6210", {
     \u6E05\u7406\u6309\u94AE\u6570: existingButtons.length,
-    \u6E05\u7406\u5BB9\u5668\u6570: existingContainers.length + existingSpans.length + existingCollapseWrappers.length
+    \u6E05\u7406\u5BB9\u5668\u6570: existingContainers.length + existingSpans.length + existingCollapseWrappers.length + existingSlots.length
   });
   console.log("[insertImagesIntoElement] Cleaned up existing image elements");
   const insertOriginalTextEnabled = String(extension_settings10[extensionName]?.insertOriginalText) === "true";
@@ -36191,16 +36195,27 @@ function extractPureTag(tag, startTag, endTag) {
   }
   return tag;
 }
+// requestId 的算法必须与 createButtonAtPosition 里那份完全一致，否则查不到标签自己的媒体。
+function tagRequestId(link) {
+  return generateStableId(String(link).replaceAll("《", "<").replaceAll("》", ">").replaceAll("\n", ""));
+}
+// 默认插入位置时媒体在锚点 span 里，非默认位置时在 .mes 层的槽位里，两处都要认。
+function isTagMediaRendered(guardScope, requestId) {
+  if (!guardScope || !requestId) return false;
+  const MEDIA_SELECTOR = "img, video, .st-chatu8-video-notice";
+  const span = guardScope.querySelector(`.st-chatu8-image-span[data-request-id="${requestId}"]`);
+  if (span?.querySelector(MEDIA_SELECTOR)) return true;
+  const slot = guardScope.querySelector(`.st-chatu8-media-slot[data-request-id="${requestId}"]`);
+  return Boolean(slot?.querySelector(MEDIA_SELECTOR));
+}
 async function getSavedImageMatches(logicalText, rootElement, logicalTextForMatchOverride, firstDivEndOffset = 0) {
   const result = [];
   try {
-    // 非默认插入位置时媒体容器挂在 .mes 上（不在 .mes_text 内），必须扩到 .mes 范围才看得见，
-    // 否则守卫失效，会在标签处又补一份出来，表现为「插入位置设置无效」。
+    // 去重按标签算，不按楼层算。这里原本是「楼层里有任何媒体就整层放弃」，代价是同一楼层的
+    // 其余标签全部失效；swipe 后残留在 .mes 上的旧槽位更会把整条新回复挡死，表现为
+    // 「该楼层已经有视频了就不再发新的」。非默认插入位置时媒体挂在 .mes 上而不在 mes_text 里，
+    // 所以判断范围仍取 .mes，只是改成逐标签比对 requestId（见 isTagMediaRendered）。
     const guardScope = rootElement.closest?.(".mes") || rootElement;
-    const existingImage = guardScope.querySelector(`.st-chatu8-image-container, .st-chatu8-media-slot`);
-    if (existingImage) {
-      return result;
-    }
     const indexOfSearchStart = firstDivEndOffset > 0 ? firstDivEndOffset : 0;
     const logicalTextForMatch = removeThinkingTextOnly(logicalTextForMatchOverride || logicalText);
     if (rootElement?.classList?.contains("mes_text")) {
@@ -36231,7 +36246,7 @@ async function getSavedImageMatches(logicalText, rootElement, logicalTextForMatc
               const existingButton = rootElement.querySelector(
                 `button.image-tag-button[data-link="${CSS.escape(linkForQuery)}"], button.image-tag-button[data-image-tag="${CSS.escape(linkForQuery)}"]`
               );
-              if (!existingButton && !textHasTag) {
+              if (!existingButton && !textHasTag && !isTagMediaRendered(guardScope, tagRequestId(linkForQuery))) {
                 const matchResult = fuzzyMatchLine(logicalTextForMatch, img.regex, 0.5);
                 if (matchResult) {
                   let correctEndIndex = matchResult.endIndex;
@@ -36290,7 +36305,7 @@ async function getSavedImageMatches(logicalText, rootElement, logicalTextForMatc
               const existingButton = rootElement.querySelector(
                 `button.image-tag-button[data-link="${CSS.escape(linkForQuery)}"], button.image-tag-button[data-image-tag="${CSS.escape(linkForQuery)}"]`
               );
-              if (!existingButton && !textHasTag) {
+              if (!existingButton && !textHasTag && !isTagMediaRendered(guardScope, tagRequestId(linkForQuery))) {
                 const matchResult = fuzzyMatchLine(logicalTextForMatch, img.regex, 0.5);
                 if (matchResult) {
                   let correctEndIndex = matchResult.endIndex;
@@ -36343,7 +36358,7 @@ async function getSavedImageMatches(logicalText, rootElement, logicalTextForMatc
       const existingButton = rootElement.querySelector(
         `button.image-tag-button[data-link="${CSS.escape(linkForQuery)}"], button.image-tag-button[data-image-tag="${CSS.escape(linkForQuery)}"]`
       );
-      if (!existingButton && !textHasTag) {
+      if (!existingButton && !textHasTag && !isTagMediaRendered(guardScope, tagRequestId(linkForQuery))) {
         result.push({
           content: img.tag,
           insertPosition: img.endIndex
@@ -36493,10 +36508,45 @@ async function createButtonAtPosition(insertPosition, tag, nodeInfos, doc, rootE
     triggerGeneration(button);
   }
 }
+// 媒体槽位挂在 .mes 上而不在 mes_text 里，酒馆 swipe / 重新生成只重写 mes_text.innerHTML，
+// 槽位就连同上一条回复的媒体一起残留下来：既在楼层里显示着过期内容，又会被去重逻辑当成
+// 「这个标签已经有媒体了」。按 swipe_id 记账，换了回复就把槽位清干净并让本层重新处理一遍。
+function pruneStaleMediaSlots(rootElement) {
+  const mesBlock = rootElement?.closest?.(".mes");
+  if (!mesBlock) return;
+  const idStr = mesBlock.getAttribute("mesid");
+  if (idStr === null) return;
+  let swipeId = 0;
+  try {
+    const message = getContext14()?.chat?.[parseInt(idStr, 10)];
+    if (!message) return;
+    swipeId = message.swipe_id ?? 0;
+  } catch (e) {
+    return;
+  }
+  const marker = String(swipeId);
+  const seen = mesBlock.dataset.chatu8Swipe;
+  if (seen === marker) return;
+  // 首次见到这个楼层时不清理：那些槽位本来就属于当前这条回复（例如刚刷新完页面）。
+  if (seen !== void 0) {
+    const staleSlots = mesBlock.querySelectorAll(".st-chatu8-media-slot");
+    staleSlots.forEach((slot) => slot.remove());
+    if (staleSlots.length > 0) {
+      console.log(`[iframe] swipe 变化（${seen} → ${marker}），已清理 ${staleSlots.length} 个过期媒体槽位`);
+    }
+    // 楼层内容整个换了，之前的处理标记必须失效，否则 chatu8Processed 早退会挡住重新插按钮。
+    if (rootElement.dataset) {
+      delete rootElement.dataset.chatu8Processed;
+      delete rootElement.dataset.chatu8ContentLength;
+    }
+  }
+  mesBlock.dataset.chatu8Swipe = marker;
+}
 async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image") {
   if (!rootElement) {
     return;
   }
+  pruneStaleMediaSlots(rootElement);
   // 先扫一遍转圈按钮：只有「真的还在生成中」的才阻塞本轮处理。
   // 陈旧的转圈按钮（对应任务早已结束或超时）会被就地复位并尝试从数据库补渲染媒体，
   // 否则一个卡死的 spinner 会永久锁死这个楼层，用户只能靠刷新页面才能看到结果。
