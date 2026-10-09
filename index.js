@@ -63752,6 +63752,25 @@ async function readOpenAIResponse(response) {
     usage: usage || void 0
   };
 }
+/**
+ * 从 Grok/OpenAI 兼容响应里挑本次要画进聊天的那个产物。
+ * 一条工作流内部串了生图+生视频时，后端会把两个产物都放进 data（顺序是「首帧图、视频」），
+ * 老代码只取 data[0]，于是永远画出第一张图、视频被静默丢掉。两段模式下优先取视频——那才是这一单的成品。
+ * 认视频以 mime_type 为准（服务端会回传 video/mp4），缺失时按 URL 后缀兜底；
+ * 找不到视频就退回第一个产物，四宫格那种只出图的形态不受影响。
+ */
+function pickGrokMediaItem(items, preferVideo) {
+  const list = Array.isArray(items) ? items.filter((candidate) => candidate && typeof candidate === "object") : [];
+  if (preferVideo) {
+    const video = list.find((candidate) => {
+      const mime = typeof candidate.mime_type === "string" ? candidate.mime_type : "";
+      const url = typeof candidate.url === "string" ? candidate.url : "";
+      return mime.startsWith("video/") || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
+    });
+    if (video) return video;
+  }
+  return list[0];
+}
 async function generateBananaImage({ prompt: prompt2, width, height, change, retouchPrompt, retouchImage, videoPrompt, videoImage, pairedVideoPrompt, requestKey }) {
   clearLog();
   const taskId = taskQueue.addTask({
@@ -64033,7 +64052,17 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
         throw new Error(`Grok API request failed (${grokResponse.status}): ${errorText}`);
       }
       const grokResult = await grokResponse.json();
-      const item = grokResult?.data?.[0];
+      // 一条工作流串了生图+生视频时 data 里有两个产物（首帧图、视频），这里按下面这段的规则挑一个画出来。
+      const grokItems = Array.isArray(grokResult?.data) ? grokResult.data : [];
+      const item = pickGrokMediaItem(grokItems, usePairedVideo);
+      if (grokItems.length > 1) {
+        addLog(`[Banana] Grok 模式：响应里有 ${grokItems.length} 个产物，本次画${item && item !== grokItems[0] ? "视频产物（首帧图不画）" : "第一个"}；要看全部去后端的任务历史。`);
+      }
+      // 后端把某一阶段的原因放在 errors 里回传（如「首帧图已生成，视频阶段失败：…」），
+      // 不翻出来时表现就是「只有图没有视频」而看不出为什么。
+      if (Array.isArray(grokResult?.errors) && grokResult.errors.length) {
+        addLog(`[Banana] Grok 模式：后端回报 ${grokResult.errors.join("；")}`);
+      }
       if (!item) {
         throw new Error(`Grok \u54CD\u5E94\u7F3A\u5C11 data[0]\uFF0C\u539F\u59CB\u54CD\u5E94: ${JSON.stringify(grokResult).slice(0, 500)}`);
       }
@@ -64087,7 +64116,8 @@ async function generateBananaImage({ prompt: prompt2, width, height, change, ret
         }
       }
       if (!imageUrl) {
-        throw new Error("Grok \u54CD\u5E94\u672A\u5305\u542B\u5A92\u4F53\uFF08b64_json/url \u5747\u4E3A\u7A7A\uFF09");
+        const reason = Array.isArray(grokResult?.errors) && grokResult.errors.length ? `\uFF1B\u540E\u7AEF\u62A5\u9519\uFF1A${grokResult.errors.join("\uFF1B")}` : "";
+        throw new Error(`Grok \u54CD\u5E94\u672A\u5305\u542B\u5A92\u4F53\uFF08b64_json/url \u5747\u4E3A\u7A7A\uFF09${reason}`);
       }
       if (!isVideoContent && String(extension_settings47[extensionName].convertToJpegStorage) === "true") {
         imageUrl = await convertImageToJpeg(imageUrl);
