@@ -36739,6 +36739,30 @@ function pruneStaleMediaSlots(rootElement) {
   }
   mesBlock.dataset.chatu8Swipe = marker;
 }
+/**
+ * 把正文里的视频标记段（默认 video###……###）接到生图段上，返回「配对上的那几个」。
+ * - 开关打开时按出现顺序一一配对：第 N 个视频段配第 N 个生图段，配上的写进生图段的
+ *   pairedVideoPrompt（组包时两段一起发）。
+ * - 配不上的（开关没开时的全部、或这一条正文只写了 video 段）**不再默默抹掉**，
+ *   而是升级成自己的生成段：摘掉 isVideoPairTag、编号接在生图段后面后推进 patternMatches，
+ *   后面那套建按钮 / 抹原文的流程就会照生图段一样处理它。纯视频工作流走的就是这条。
+ *   这些段不参与预生成，编号与预生成那边的口径各自独立，所以不会撞车也不会多派发一次。
+ * 纯函数：只改 patternMatches 里的两个键，并返回配对上的视频段（它们不建按钮，只被抹掉）。
+ */
+function resolveVideoSegments(patternMatches, videoMatches, pairEnabled) {
+  const paired = pairEnabled ? videoMatches.slice(0, patternMatches.length) : [];
+  patternMatches.forEach((item, index) => {
+    item.pairedVideoPrompt = paired[index]?.content || "";
+  });
+  const solo = videoMatches.slice(paired.length).map((match, index) => ({
+    ...match,
+    isVideoPairTag: false,
+    isSoloVideoSegment: true,
+    ordinal: patternMatches.length + index
+  }));
+  patternMatches.push(...solo);
+  return paired;
+}
 async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image") {
   if (!rootElement) {
     return;
@@ -36807,8 +36831,9 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
     item.ordinal = index;
   });
   const messageIdentity = resolveMessageIdentity(rootElement);
-  // 图生视频：正文里与生图提示词并列的第二段。按出现顺序与生图段配对——一条消息里
-  // 通常只有一组；配不上的视频段不会凭空触发生成，只是跟着从正文里抹掉。
+  // 图生视频：正文里与生图提示词并列的第二段。按出现顺序与生图段配对——一条消息里通常只有一组。
+  // 配得上就用配对语义（两段一起发）；配不上的视频段不再被默默抹掉，而是自己当一次生成段
+  // （纯视频工作流就是这条：正文里只写 video###……###，按这段内容发一次生成）。
   // 标记一律按「有值就用、没值回落默认」处理，不能要求设置里必须存着：
   // 设置是浅合并（{ ...defaultSettings, ...已存设置 }），老用户的 banana 对象会整个盖掉默认值，
   // 新增的键根本进不去。曾经在这里判空，结果开了开关也识别不到第二段。
@@ -36818,10 +36843,13 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
   const videoPairEnabled = String(bananaPairSettings.grokVideoPair) === "true"
     && String(bananaPairSettings.useGrokFormat) === "true";
   if (String(bananaPairSettings.grokVideoPair) === "true" && String(bananaPairSettings.useGrokFormat) !== "true") {
-    console.warn("[st-chatu8] 已开启图生视频（两段提示词），但「Grok/newapi/openai格式」未开启，第二段提示词不会被识别。");
+    console.warn("[st-chatu8] 已开启图生视频（两段提示词），但「Grok/newapi/openai格式」未开启：两段不会被合并成一次请求，video### 段只会单独发一次生成。");
   }
+  // 视频标记一律扫描，不再只在两段开关打开时才看：它和生图标记一样是「生成段」标记。
+  // 开关只管「要不要按配对语义把两段合成一次请求」；识别不识别不该跟着它走——
+  // 纯视频生成（正文里只写一段 video###……###）正是开关没开时最需要它的场景。
   const videoMatches = [];
-  if (videoPairEnabled) {
+  {
     const videoPattern = new RegExp(
       `${escapeRegExp2(videoStartTag)}([\\s\\S]*?)${escapeRegExp2(videoEndTag)}`,
       "g"
@@ -36839,10 +36867,8 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
         isVideoPairTag: true
       });
     }
-    patternMatches.forEach((item, index) => {
-      item.pairedVideoPrompt = videoMatches[index]?.content || "";
-    });
   }
+  const pairedVideoMatches = resolveVideoSegments(patternMatches, videoMatches, videoPairEnabled);
   const savedMatches = await getSavedImageMatches(logicalText, rootElement, logicalTextExcludingFirstDiv, firstDivEndOffset > 0 ? firstDivEndOffset : 0);
   if (patternMatches.length === 0 && savedMatches.length === 0) return;
   const clickPromises = [];
@@ -36864,7 +36890,8 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
   }
   // 视频提示词段和生图段一起按出现顺序倒序处理：必须同一趟倒序，先删靠后的匹配，
   // 前面那些匹配的文本偏移才不会被删动过的节点带偏。
-  const matchesToProcess = [...patternMatches, ...videoMatches].sort((a, b) => a.startIndex - b.startIndex);
+  // 这里只带配对上的视频段（它们不建按钮，只被抹掉）；单出来的那些已经进 patternMatches 了。
+  const matchesToProcess = [...patternMatches, ...pairedVideoMatches].sort((a, b) => a.startIndex - b.startIndex);
   for (let i = matchesToProcess.length - 1; i >= 0; i--) {
     const matchInfo = matchesToProcess[i];
     const nodesToProcess = nodeInfos.filter(
@@ -36938,6 +36965,11 @@ async function findAndReplaceInElement(rootElement, imageAlt = "Generated Image"
     button.dataset.link = link;
     button.dataset.requestId = requestId;
     button.dataset.imageTag = link;
+    // 单出来的视频段：按钮照生图段那套走，另给一个说明，点的人知道这句发出去的是视频提示词。
+    if (matchInfo.isSoloVideoSegment) {
+      button.dataset.soloVideoSegment = "true";
+      button.title = "\u8FD9\u6BB5\u662F\u89C6\u9891\u63D0\u793A\u8BCD\uFF08video###\uFF09\uFF1A\u70B9\u5B83\u4F1A\u6309\u8FD9\u6BB5\u5185\u5BB9\u751F\u6210\u4E00\u6B21";
+    }
     if (requestKey) button.dataset.requestKey = requestKey;
     // 配对的视频提示词随按钮一起存下来：重新生成、重渲染后再点都拿得到同一段。
     if (matchInfo.pairedVideoPrompt) button.dataset.pairedVideoPrompt = matchInfo.pairedVideoPrompt;
