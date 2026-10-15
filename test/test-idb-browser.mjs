@@ -1,14 +1,22 @@
 // 真实浏览器里验证改后的 IndexedDB 包装：正常路径没被改坏（含 5MB 视频级数据往返），
 // 真实 transaction.abort() 会 reject 而不是挂起，openDB 被旧连接阻塞时会 reject。
 // 测试页把结果 POST 回本地服务，避免 --dump-dom 的时机问题。
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const CHROME = [
+  process.env.CHROME,
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+].find((p) => p && existsSync(p));
+if (!CHROME) throw new Error('找不到 Chrome，请用 CHROME 环境变量指定');
 const src = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const start = src.indexOf('function awaitIdbRequest(');
 if (start === -1) throw new Error('未在 index.js 中找到 awaitIdbRequest');
@@ -94,6 +102,8 @@ const port = server.address().port;
 const profile = mkdtempSync(join(tmpdir(), 'chatu8-idb-'));
 const chrome = spawn(CHROME, [
   '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+  '--disable-dev-shm-usage',
+  ...(process.getuid && process.getuid() === 0 ? ['--no-sandbox'] : []),
   `--user-data-dir=${profile}`, `http://127.0.0.1:${port}/`,
 ], { stdio: 'ignore' });
 

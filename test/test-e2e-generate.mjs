@@ -252,6 +252,8 @@ const profile = mkdtempSync(join(tmpdir(), 'chatu8-gen-profile-'));
 const chrome = spawn(CHROME, [
   '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
   '--autoplay-policy=no-user-gesture-required', '--mute-audio', '--window-size=1200,900',
+  '--disable-dev-shm-usage',
+  ...(process.getuid && process.getuid() === 0 ? ['--no-sandbox'] : []),
   `--user-data-dir=${profile}`, `http://127.0.0.1:${port}/`,
 ], { stdio: 'ignore' });
 

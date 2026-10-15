@@ -3,6 +3,8 @@
 //      fixMp4Faststart 解析不再整份复制（输出逐字节不变）。
 //   2) 只播放看得见的视频：滚出视口暂停、滚回来续播；用户按过暂停的不续播；开了声音的滚走也不停。
 //   3) 楼层重绘丢掉的视频元素，blob URL 会被释放；短暂搬动的不误收；iframe 被移除也算丢掉。
+//   4) 视频自动播放开关：默认关闭时一律不自动播（可见的也不播），点了才播、滚走不暂停；
+//      开启时才回到 2) 的行为。
 // 测试视频由页面里的 MediaRecorder 现录，不依赖外部素材。
 // 用法：node test/test-video-perf-browser.mjs（可用 CHROME 环境变量指定浏览器路径）
 import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -50,6 +52,7 @@ const realCode = [
   extract('function _addToStcoOffsets('),
   extract('async function fixMp4Faststart('),
   extract('function getChatVideoObserver('),
+  extract('function isChatVideoAutoplayOn('),
   extract('function playChatVideoIfAllowed('),
   extract('function pauseChatVideoOffscreen('),
   extract('function setupChatVideoPlayback('),
@@ -106,7 +109,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8">
 </head><body><div id="chat"></div><pre id="result">PENDING</pre>
 <script>
 var extensionName = 'st-chatu8';
-var extension_settings40 = { 'st-chatu8': { dbclike: 'false', clickToPreview: 'false', longPressToEdit: 'false', collapseImage: 'false' } };
+var extension_settings40 = { 'st-chatu8': { dbclike: 'false', clickToPreview: 'false', longPressToEdit: 'false', collapseImage: 'false', videoAutoplay: 'true' } };
 var _showImagePreview = null;
 function showEditDialog() {}
 function addSmoothShakeEffect() {}
@@ -316,6 +319,77 @@ async function run() {
     sweepDetachedChatVideos(t2);
     const r2 = sweepDetachedChatVideos(t2 + CHAT_VIDEO_BLOB_RELEASE_MS + 1000);
     push('iframe 被移除后其中的视频 blob 也被释放', r2 === 1 && !chatVideoBlobUrls.has(iframeVideo) && !(await blobAlive(iframeUrl)), 'released=' + r2);
+
+    // ---------- 4) 进聊天补渲染：屏幕外的历史视频一次都不许开播 ----------
+    // 时序是这段的关键：createAndShowImage 转码一完成（几毫秒）就会做一次播放判定，
+    // 而可见性观察器的第一次回调要等到下一个渲染帧、并且会被同时补渲染的几十个视频挤后。
+    // 判定条件若写成「只有明确不可见才拦」，没判定的（undefined）就会被放行 ——
+    // 于是整屏外的历史视频全部 play()，解码器和缓冲同时起来，这就是进聊天卡顿的来源。
+    const lateHost = document.createElement('div');
+    document.body.appendChild(lateHost); // 窗口此时停在顶部，这个容器整块在屏幕外
+    const lateFloors = [];
+    for (let i = 0; i < 6; i++) lateFloors.push(addFloor(document, lateHost));
+    const lateVideos = [];
+    const playedEver = new Set();
+    let maxConcurrent = 0;
+    const burstSampler = setInterval(() => {
+      let n = 0;
+      for (const v of lateVideos) if (!v.paused) n++;
+      maxConcurrent = Math.max(maxConcurrent, n);
+    }, 5);
+    for (let i = 0; i < lateFloors.length; i++) {
+      // 前三条模拟 hydrateMissingMedia 逐条 await 读库；后三条同一个任务里连发，
+      // 把「转码全部先完成、观察器回调还没来」这个竞态窗口拉满，避免用例在快机器上漏判。
+      if (i < 3) await sleep(2);
+      createAndShowImage(lateFloors[i].span, videoDataUrl, 'x', null, '', true, '');
+      const v = videoOf(lateFloors[i]);
+      lateVideos.push(v);
+      v.addEventListener('play', () => playedEver.add(lateFloors[i]));
+    }
+    await waitFor(() => lateFloors.every((f) => videoOf(f)?.getAttribute('src')?.startsWith('blob:')));
+    await sleep(600);
+    clearInterval(burstSampler);
+    push('补渲染的屏幕外历史视频从头到尾没播过', playedEver.size === 0, 'played=' + playedEver.size + ' maxConcurrent=' + maxConcurrent);
+    push('补渲染期间没有并发播放', maxConcurrent === 0, 'maxConcurrent=' + maxConcurrent);
+    lateFloors[0].floor.scrollIntoView();
+    await waitFor(() => !videoOf(lateFloors[0]).paused);
+    push('滚到可见之后才开播', !videoOf(lateFloors[0]).paused);
+    for (const f of lateFloors) videoOf(f).pause();
+
+    // ---------- 5) 关闭自动播放（默认）：一个都不许自己播，点了才播 ----------
+    // 这是默认档：videoAutoplay 缺省（老用户升级后）或为 'false' 时都必须不自动播。
+    delete extension_settings40[extensionName].videoAutoplay;
+    const offHost = document.createElement('div');
+    document.body.appendChild(offHost);
+    const offFloors = [];
+    for (let i = 0; i < 4; i++) offFloors.push(addFloor(document, offHost));
+    const offPlayed = new Set();
+    for (const f of offFloors) {
+      createAndShowImage(f.span, videoDataUrl, 'x', null, '', true, '');
+      videoOf(f).addEventListener('play', () => offPlayed.add(f));
+    }
+    await waitFor(() => offFloors.every((f) => videoOf(f)?.getAttribute('src')?.startsWith('blob:')));
+    offFloors[0].floor.scrollIntoView(); // 明确滚到可见位置
+    await sleep(800);
+    push('默认档：视频换成 blob 后没有自动播放', offPlayed.size === 0, 'played=' + offPlayed.size);
+    push('默认档：可见的视频也是暂停的', offFloors.every((f) => videoOf(f).paused), 'playing=' + offFloors.map((f, i) => (videoOf(f).paused ? -1 : i)).filter((i) => i >= 0));
+    push('默认档：没有挂可见性自动接管（未被标记过可见）', offFloors.every((f) => videoOf(f)._chatu8Visible !== true));
+    // 模拟用户点视频上的原生播放按钮
+    await videoOf(offFloors[0]).play();
+    push('默认档：点了才播', !videoOf(offFloors[0]).paused);
+    push('默认档：点击播的不算「用户暂停」', videoOf(offFloors[0]).dataset.userPaused === undefined);
+    window.scrollTo(0, document.body.scrollHeight); // 滚到页面最底部，把它挤出视口
+    await sleep(600);
+    push('默认档：用户点播的视频滚出视口不被自动暂停', !videoOf(offFloors[0]).paused);
+    videoOf(offFloors[0]).pause();
+    // 开关打开后回到「可见才播」
+    extension_settings40[extensionName].videoAutoplay = 'true';
+    const onFloor = addFloor(document, offHost);
+    createAndShowImage(onFloor.span, videoDataUrl, 'x', null, '', true, '');
+    await waitFor(() => videoOf(onFloor)?.getAttribute('src')?.startsWith('blob:'));
+    onFloor.floor.scrollIntoView();
+    await waitFor(() => !videoOf(onFloor).paused);
+    push('打开开关后：可见的视频自动播放', !videoOf(onFloor).paused);
   } catch (e) {
     push('测试自身异常', false, (e && (e.stack || e.message)) || String(e));
   }
@@ -345,7 +419,8 @@ const port = server.address().port;
 const profile = mkdtempSync(join(tmpdir(), 'chatu8-video-perf-'));
 const chrome = spawn(CHROME, [
   '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-  '--autoplay-policy=no-user-gesture-required', '--window-size=800,600',
+  '--autoplay-policy=no-user-gesture-required', '--window-size=800,600', '--disable-dev-shm-usage',
+  ...(process.getuid && process.getuid() === 0 ? ['--no-sandbox'] : []),
   `--user-data-dir=${profile}`, `http://127.0.0.1:${port}/`,
 ], { stdio: 'ignore' });
 

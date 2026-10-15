@@ -1798,6 +1798,9 @@ var init_config = __esm({
       zidongdianji2: "false",
       longPressToEdit: "false",
       clickToPreview: "true",
+      // 聊天视频自动播放。默认关闭：整聊天的历史视频一起自动播会占满解码器、进聊天就卡，
+      // 关闭时视频只在你点击播放后才播。想要「滚到哪播哪」的用户可以在主要设置里打开。
+      videoAutoplay: "false",
       nai3VibeTransfer: "false",
       enableVibeGroupTransfer: "false",
       randomVibeGroup: "false",
@@ -35815,6 +35818,12 @@ function resolveMediaContainer(doc, anchorSpan, requestId, insertMode) {
 // 聊天里的视频以前一律 autoplay+loop：视频一多就是几十路解码同时跑，滚出屏幕的也照跑，整页卡顿。
 // 现在只播放看得见的：进入视口才 play，离开视口就暂停。两种情况不动它：
 // 用户自己按过暂停的（回到视口也不续播），以及用户开了声音的（用户在听，滚走也继续放）。
+// 聊天视频是否自动播放。默认关闭：全聊天的历史视频一起自动播会占满解码器、一进聊天就卡，
+// 所以默认不自动播，点视频上的播放按钮才播。开启后回到「滚进视口才播、滚出去暂停」。
+function isChatVideoAutoplayOn() {
+  const raw = extension_settings40?.[extensionName]?.videoAutoplay;
+  return raw === true || raw === "true";
+}
 function getChatVideoObserver(doc) {
   if (chatVideoObservers.has(doc)) return chatVideoObservers.get(doc);
   const IO = doc?.defaultView?.IntersectionObserver || (typeof IntersectionObserver === "function" ? IntersectionObserver : null);
@@ -35841,7 +35850,12 @@ function getChatVideoObserver(doc) {
 }
 function playChatVideoIfAllowed(video) {
   if (!video?.isConnected || !video.paused) return;
-  if (video._chatu8Visible === false || video.dataset.userPaused === "true") return;
+  // 关闭自动播放时这里一律不放行：只有用户点播放按钮（原生控件）才播。
+  if (!isChatVideoAutoplayOn()) return;
+  // 可见性必须被观察器明确确认过才允许开播。_chatu8Visible 在观察器第一次回调之前是 undefined，
+  // 以前写成「只有明确 false 才拦」，没判定的就被放行 —— 进聊天补渲染时几十个历史视频会在同一瞬间
+  // 并发 play()：解码器、缓冲全部起来，屏幕外的也照起，这才是「一进聊天所有历史视频都在播、卡顿」的来源。
+  if (video._chatu8Visible !== true || video.dataset.userPaused === "true") return;
   // src 还在异步转换时先不播，赋值那一刻会再调一次。
   if (!video.getAttribute("src")) return;
   const p = video.play();
@@ -35849,6 +35863,8 @@ function playChatVideoIfAllowed(video) {
   });
 }
 function pauseChatVideoOffscreen(video) {
+  // 关闭自动播放时不做任何自动暂停：用户自己点播的视频，滚出屏幕也让他继续看。
+  if (!isChatVideoAutoplayOn()) return;
   if (video.paused || !video.muted) return;
   video._chatu8AutoPausing = true;
   video.pause();
@@ -35866,10 +35882,15 @@ function setupChatVideoPlayback(video) {
   video.addEventListener("play", () => {
     delete video.dataset.userPaused;
   });
+  // 关闭自动播放：不挂可见性观察器，播不播完全交给用户点击。
+  if (!isChatVideoAutoplayOn()) return;
   const observer = getChatVideoObserver(video.ownerDocument);
   if (observer) {
     observer.observe(video);
   } else {
+    // 没有 IntersectionObserver 就没有可见性信息：退回「交给浏览器 autoplay」的老行为，
+    // 同时标记为已可见，否则 playChatVideoIfAllowed 会一直卡在等待确认的状态。
+    video._chatu8Visible = true;
     video.autoplay = true;
   }
 }
@@ -52635,6 +52656,7 @@ var init_configDescriptions = __esm({
       imageAlignment: "\u804A\u5929\u6846\u5185\u7684\u56FE\u7247\u5BF9\u9F50\u65B9\u5F0F ('left', 'center', 'right')",
       imageSizeScale: "\u804A\u5929\u6846\u5185\u7684\u56FE\u7247\u663E\u793A\u5927\u5C0F\u767E\u5206\u6BD4 ('100', '75', '50', '25')",
       collapseImage: "\u662F\u5426\u9ED8\u8BA4\u6298\u53E0\u5927\u56FE\u7247 (\u5E03\u5C14\u5B57\u7B26\u4E32 'true'/'false')",
+      videoAutoplay: "\u804A\u5929\u91CC\u7684\u89C6\u9891\u662F\u5426\u81EA\u52A8\u64AD\u653E\u3002\u9ED8\u8BA4 'false'\uFF1A\u4E0D\u81EA\u52A8\u64AD\u653E\uFF0C\u70B9\u89C6\u9891\u4E0A\u7684\u64AD\u653E\u6309\u94AE\u624D\u64AD\uFF1B'true'\uFF1A\u6EDA\u8FDB\u89C6\u53E3\u81EA\u52A8\u64AD\u653E (\u5E03\u5C14\u5B57\u7B26\u4E32 'true'/'false')",
       // 后端工作模式
       mode: "\u5F53\u524D\u9009\u62E9\u7684\u56FE\u50CF\u751F\u6210\u540E\u7AEF\uFF0C\u53EF\u9009\u503C\u4E3A\uFF1A'comfyui', 'novelai', 'sd', 'banana'",
       client: "\u5BA2\u6237\u7AEF\u73AF\u5883\u6807\u8BC6\uFF0C\u5E38\u89C4\u4E3A 'browser','jiuguan'\u51B3\u5B9A\u4E86\u4ECE\u54EA\u91CC\u53D1\u8D77\u751F\u56FE\u8BF7\u6C42\uFF0C\u5982\u679C\u4ECE\u6D4F\u89C8\u5668\u53D1\u60C5\u8BF7\u6C42\u53EF\u80FD\u4F1A\u78B0\u5230\u8DE8\u57DF\u95EE\u9898",
@@ -70848,6 +70870,7 @@ async function handleExportLog() {
 `;
   settingsInfo += `- \u5355\u51FB\u56FE\u7247\u9884\u89C8: ${settings3.clickToPreview ? "\u662F" : "\u5426"}
 `;
+  settingsInfo += `- \u89C6\u9891\u81EA\u52A8\u64AD\u653E: ${settings3.videoAutoplay === "true" ? "\u662F" : "\u5426"}\n`;
   settingsInfo += `- \u6362\u884C\u4FEE\u590D: ${settings3.newlineFixEnabled ? "\u662F" : "\u5426"}
 `;
   settingsInfo += `- \u542F\u7528\u6D41\u5F0F\u9884\u751F\u6210: ${settings3.enablePregen ? "\u662F" : "\u5426"}
@@ -83753,6 +83776,7 @@ var SettingsHelpText = {
   },
   longPressToEdit: "**\u957F\u6309**\u5DF2\u751F\u6210\u7684\u56FE\u7247\uFF0C\u5F39\u51FA\u7F16\u8F91\u6846\u4EE5\u4FEE\u6539 tag\uFF08\u5F00\u542F\u66F4\u591A\u529F\u80FD\u7684\u524D\u7F6E\u9879\uFF09",
   clickToPreview: "**\u5355\u51FB**\u56FE\u7247\u4E0A\u534A\u90E8\u5206\u5F39\u51FA\u5927\u56FE\u9884\u89C8\uFF0C\u53EF\u5DE6\u53F3\u5207\u6362\u67E5\u770B\u5176\u4ED6\u56FE\u7247",
+  videoAutoplay: "\u5173\u95ED\uFF08\u9ED8\u8BA4\uFF09\u65F6\u804A\u5929\u91CC\u7684\u89C6\u9891**\u4E0D\u81EA\u52A8\u64AD\u653E**\uFF0C\u70B9\u89C6\u9891\u4E0A\u7684\u64AD\u653E\u6309\u94AE\u624D\u64AD\uFF1B\u5F00\u542F\u540E\u6EDA\u8FDB\u89C6\u53E3\u81EA\u52A8\u64AD\u653E\u3002\u89C6\u9891\u591A\u65F6\u5F00\u7740\u4F1A\u56E0\u4E3A\u540C\u65F6\u89E3\u7801\u800C\u5361\u987F",
   newlineFixEnabled: "\u4FEE\u590D\u67D0\u4E9B\u60C5\u51B5\u4E0B `###` \u7ED3\u675F\u6807\u8BB0\u4F1A\u5355\u72EC\u5360\u4E00\u884C\u7684\u663E\u793A\u5F02\u5E38",
   enablePregen: {
     short: "\u56DE\u590D\u8FD8\u5728\u6D41\u5F0F\u8FD4\u56DE\u3001\u6216\u975E\u6D41\u5F0F\u521A\u5230\u8FBE\u65F6\u5C31\u63D0\u524D\u5F00\u59CB\u751F\u56FE\uFF0C\u52A0\u5FEB\u6574\u4F53\u901F\u5EA6\uFF08\u4EC5\u4E16\u754C\u4E66\u6A21\u5F0F\uFF09",
@@ -84934,7 +84958,7 @@ async function initUI({ check_update: check_update2 }) {
       settings2.theme_id = "\u9ED8\u8BA4-\u767D\u5929";
     }
     applyTheme(settings2.themes[settings2.theme_id]);
-    const mainKeys = ["scriptEnabled", "helpTipsEnabled", "newlineFixEnabled", "mode", "client", "displayMode", "heavyFrontendMode", "insertOriginalText", "dbclike", "collapseImage", "zidongdianji", "zidongdianji2", "longPressToEdit", "clickToPreview", "startTag", "endTag", "cache", "sdUrl", "st_chatu8_sd_auth", "comfyuiUrl", "novelaiApi", "novelaisite", "novelaiOtherSite", "enableCloudQueue", "cloudQueueUrl", "cloudQueueGreeting", "showQueueGreeting", "novelaimode", "novelai_sampler", "Schedule", "nai3Scale", "cfg_rescale", "AI_use_coords", "sm", "dyn", "nai3Variety", "nai3Deceisp", "sd_cwidth", "sd_cheight", "sd_csteps", "sd_cseed", "sdCfgScale", "restoreFaces", "novelai_width", "novelai_height", "novelai_steps", "novelai_seed", "nai3VibeTransfer", "enableVibeGroupTransfer", "randomVibeGroup", "normalizeRefStrength", "InformationExtracted", "ReferenceStrength", "nai3CharRef", "nai3StylePerception", "comfyui_width", "comfyui_height", "comfyui_steps", "comfyui_seed", "cfg_comfyui", "worker", "ipa", "c_fenwei", "c_xijie", "c_quanzhong", "c_idquanzhong", "AQT_sd", "UCP_sd", "AQT_novelai", "UCP_novelai", "AQT_comfyui", "UCP_comfyui", "addFurryDataset", "sd_cupscale_factor", "sd_chires_fix", "sd_chires_steps", "sd_cdenoising_strength", "sd_cclip_skip", "sd_cadetailer", "worldBookEnabled", "ai_temperature", "ai_top_p", "ai_presence_penalty", "ai_frequency_penalty", "ai_stream", "ai_private", "ai_token", "vocabulary_search_startswith", "vocabulary_search_limit", "vocabulary_search_sort", "enablePregen", "thinkTagFormat", "autoLLMImageGen", "randomYushe", "aiAutonomousResolution", "imageAlignment", "imageSizeScale", "imageGenInterval", "translation_system_prompt", "ai_test_system", "ai_test_user", "ai_test_output", "jiuguanchucun", "vibeJiuguanchucun", "convertToJpegStorage", "mediaInsertPosition", "weilin_lora_fix"];
+    const mainKeys = ["scriptEnabled", "helpTipsEnabled", "newlineFixEnabled", "mode", "client", "displayMode", "heavyFrontendMode", "insertOriginalText", "dbclike", "collapseImage", "zidongdianji", "zidongdianji2", "longPressToEdit", "clickToPreview", "videoAutoplay", "startTag", "endTag", "cache", "sdUrl", "st_chatu8_sd_auth", "comfyuiUrl", "novelaiApi", "novelaisite", "novelaiOtherSite", "enableCloudQueue", "cloudQueueUrl", "cloudQueueGreeting", "showQueueGreeting", "novelaimode", "novelai_sampler", "Schedule", "nai3Scale", "cfg_rescale", "AI_use_coords", "sm", "dyn", "nai3Variety", "nai3Deceisp", "sd_cwidth", "sd_cheight", "sd_csteps", "sd_cseed", "sdCfgScale", "restoreFaces", "novelai_width", "novelai_height", "novelai_steps", "novelai_seed", "nai3VibeTransfer", "enableVibeGroupTransfer", "randomVibeGroup", "normalizeRefStrength", "InformationExtracted", "ReferenceStrength", "nai3CharRef", "nai3StylePerception", "comfyui_width", "comfyui_height", "comfyui_steps", "comfyui_seed", "cfg_comfyui", "worker", "ipa", "c_fenwei", "c_xijie", "c_quanzhong", "c_idquanzhong", "AQT_sd", "UCP_sd", "AQT_novelai", "UCP_novelai", "AQT_comfyui", "UCP_comfyui", "addFurryDataset", "sd_cupscale_factor", "sd_chires_fix", "sd_chires_steps", "sd_cdenoising_strength", "sd_cclip_skip", "sd_cadetailer", "worldBookEnabled", "ai_temperature", "ai_top_p", "ai_presence_penalty", "ai_frequency_penalty", "ai_stream", "ai_private", "ai_token", "vocabulary_search_startswith", "vocabulary_search_limit", "vocabulary_search_sort", "enablePregen", "thinkTagFormat", "autoLLMImageGen", "randomYushe", "aiAutonomousResolution", "imageAlignment", "imageSizeScale", "imageGenInterval", "translation_system_prompt", "ai_test_system", "ai_test_user", "ai_test_output", "jiuguanchucun", "vibeJiuguanchucun", "convertToJpegStorage", "mediaInsertPosition", "weilin_lora_fix"];
     mainKeys.forEach((key) => {
       const element = document.getElementById(key);
       if (element) {

@@ -2,14 +2,22 @@
 // 该补的补上、该跳过的跳过、刚发起的生成不被误复位、iframe 里的锚点也覆盖、并发不重入。
 // hasRenderedMedia / resolveMediaContainer / collectMediaDocuments 用 index.js 里的真实实现；
 // createAndShowImage / getItemImg / getInsertMode 是既有的成熟函数，这里 stub 掉以隔离编排逻辑。
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const CHROME = [
+  process.env.CHROME,
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+].find((p) => p && existsSync(p));
+if (!CHROME) throw new Error('找不到 Chrome，请用 CHROME 环境变量指定');
 const src = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 function extract(signature) {
   const start = src.indexOf(signature);
@@ -189,6 +197,8 @@ const port = server.address().port;
 const profile = mkdtempSync(join(tmpdir(), 'chatu8-hydrate-'));
 const chrome = spawn(CHROME, [
   '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+  '--disable-dev-shm-usage',
+  ...(process.getuid && process.getuid() === 0 ? ['--no-sandbox'] : []),
   `--user-data-dir=${profile}`, `http://127.0.0.1:${port}/`,
 ], { stdio: 'ignore' });
 
